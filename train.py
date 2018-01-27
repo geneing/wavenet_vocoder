@@ -20,6 +20,9 @@ from os.path import dirname, join
 from tqdm import tqdm, trange
 from datetime import datetime
 
+import matplotlib as mpl
+mpl.use('Agg')
+
 from wavenet_vocoder import builder
 import lrschedule
 
@@ -418,11 +421,12 @@ def collate_fn(batch):
     # pad for time-axis
     if is_mulaw_quantize(hparams.input_type):
         x_batch = np.array([_pad_2d(np_utils.to_categorical(
-            x[0], num_classes=hparams.quantize_channels),
+            np.clip(x[0],0,hparams.quantize_channels-1), num_classes=hparams.quantize_channels),
             max_input_len) for x in batch], dtype=np.float32)
     else:
         x_batch = np.array([_pad_2d(x[0].reshape(-1, 1), max_input_len)
                             for x in batch], dtype=np.float32)
+
     assert len(x_batch.shape) == 3
 
     # (B, T)
