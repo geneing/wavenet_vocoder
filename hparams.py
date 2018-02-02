@@ -27,8 +27,8 @@ hparams = tf.contrib.training.HParams(
     # **NOTE**: if you change the one of the two parameters below, you need to
     # re-run preprocessing before training.
     # **NOTE**: scaler input (raw or mulaw) is experimental. Use it your own risk.
-    input_type="mulaw-quantize",
-    quantize_channels=256,  # 65536 or 256
+    input_type="raw",
+    quantize_channels=65536,  # 65536 or 256
 
     # Audio:
     sample_rate=22050,
@@ -44,7 +44,6 @@ hparams = tf.contrib.training.HParams(
     min_level_db=-100,
     ref_level_db=20,
     # whether to rescale waveform or not.
-    # This is only valid for input_type="raw"
     # Let x is an input waveform, rescaled waveform y is given by:
     # y = x / np.abs(x).max() * rescaling_max
     rescaling=True,
