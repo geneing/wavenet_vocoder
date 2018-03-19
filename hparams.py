@@ -62,6 +62,7 @@ hparams = tf.contrib.training.HParams(
     kernel_size=3,
     # If True, apply weight normalization as same as DeepVoice3
     weight_normalization=True,
+    gru_hidden_size = 512,
     # Use legacy code or not. Default is True since we already provided a model
     # based on the legacy code that can generate high-quality audio.
     # Ref: https://github.com/r9y9/wavenet_vocoder/pull/73
