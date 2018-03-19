@@ -902,7 +902,7 @@ if __name__ == "__main__":
     hparams.parse(args["--hparams"])
     assert hparams.name == "wavenet_vocoder"
     print(hparams_debug_string())
-
+    
     fs = hparams.sample_rate
 
     os.makedirs(checkpoint_dir, exist_ok=True)
