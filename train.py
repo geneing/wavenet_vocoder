@@ -781,24 +781,7 @@ def build_model():
         s += "Notice that upsample conv layers will never be used."
         warn(s)
 
-    model = getattr(builder, hparams.builder)(
-        out_channels=hparams.out_channels,
-        layers=hparams.layers,
-        stacks=hparams.stacks,
-        residual_channels=hparams.residual_channels,
-        gate_channels=hparams.gate_channels,
-        skip_out_channels=hparams.skip_out_channels,
-        cin_channels=hparams.cin_channels,
-        gin_channels=hparams.gin_channels,
-        weight_normalization=hparams.weight_normalization,
-        n_speakers=hparams.n_speakers,
-        dropout=hparams.dropout,
-        kernel_size=hparams.kernel_size,
-        upsample_conditional_features=hparams.upsample_conditional_features,
-        upsample_scales=hparams.upsample_scales,
-        freq_axis_kernel_size=hparams.freq_axis_kernel_size,
-        scalar_input=is_scalar_input(hparams.input_type),
-    )
+    model = getattr(builder, hparams.builder)(hparams)
     return model
 
 
