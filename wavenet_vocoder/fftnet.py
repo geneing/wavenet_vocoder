@@ -6,14 +6,13 @@ import numpy as np
 
 import torch
 from torch import nn
-from torch.autograd import Variable
 from torch.nn import functional as F
 
-from deepvoice3_pytorch.modules import Embedding
+from .modules import Embedding
 
 from .modules import Conv1d1x1, ResidualConv1dGLU, ConvTranspose2d
 from .mixture import sample_from_discretized_mix_logistic
-
+from audio import dummy_silence
 
 def _expand_global_features(B, T, g, bct=True):
     """Expand global conditioning features to all time steps
@@ -21,11 +20,11 @@ def _expand_global_features(B, T, g, bct=True):
     Args:
         B (int): Batch size.
         T (int): Time length.
-        g (Variable): Global features, (B x C) or (B x C x 1).
+        g (Tensor): Global features, (B x C) or (B x C x 1).
         bct (bool) : returns (B x C x T) if True, otherwise (B x T x C)
 
     Returns:
-        Variable: B x C x T or B x T x C or None
+        Tensor: B x C x T or B x T x C or None
     """
     if g is None:
         return None
@@ -38,15 +37,27 @@ def _expand_global_features(B, T, g, bct=True):
         return g_btc.contiguous()
 
 
-class WaveRNN(nn.Module):
-    """The WaveRNN model that supports local and global conditioning.
+def receptive_field_size(total_layers):
+    """Compute receptive field size
+
+    Args:
+        total_layers (int): total layers
+
+    Returns:
+        int: receptive field size in sample
+
+    """
+    return 2**total_layers
+
+
+class FFTNet(nn.Module):
+    """The FFTNet model that supports local and global conditioning.
 
     Args:
         out_channels (int): Output channels. If input_type is mu-law quantized
           one-hot vecror. this must equal to the quantize channels. Other wise
           num_mixtures x 3 (pi, mu, log_scale).
         layers (int): Number of total layers
-        stacks (int): Number of dilation cycles
         residual_channels (int): Residual input / output channels
         gate_channels (int): Gated activation channels.
         skip_out_channels (int): Skip connection channels.
@@ -75,81 +86,43 @@ class WaveRNN(nn.Module):
           directly.
     """
 
-    def __init__(self, out_channels=256,
-                 gru_hidden_size=512,
+    def __init__(self, in_channels=256, out_channels=256, layers=11,
                  dropout=1 - 0.95,
                  cin_channels=-1, gin_channels=-1, n_speakers=None,
-                 weight_normalization=True,
                  upsample_conditional_features=False,
-                 upsample_scales=None,
-                 freq_axis_kernel_size=3,
-                 scalar_input=False,
-                 use_speaker_embedding=True,
+                 use_speaker_embedding=False,
+                 scalar_input=False
                  ):
-        super(WaveRNN, self).__init__()
-        self.scalar_input = scalar_input
+        super(FFTNet, self).__init__()
         self.out_channels = out_channels
         self.cin_channels = cin_channels
-        # assert layers % stacks == 0
-        # layers_per_stack = layers // stacks
-        # if scalar_input:
-        #     self.first_conv = Conv1d1x1(1, residual_channels)
-        # else:
-        #     self.first_conv = Conv1d1x1(out_channels, residual_channels)
-        #
-        # self.fft_layers = nn.ModuleList()
-        # for layer in range(layers):
-        #     dilation = 2**(layer % layers_per_stack)
-        #     conv = ResidualConv1dGLU(
-        #         residual_channels, gate_channels,
-        #         kernel_size=kernel_size,
-        #         skip_out_channels=skip_out_channels,
-        #         bias=True,  # magenda uses bias, but musyoku doesn't
-        #         dilation=dilation, dropout=dropout,
-        #         cin_channels=cin_channels,
-        #         gin_channels=gin_channels,
-        #         weight_normalization=weight_normalization)
-        #     self.fft_layers.append(conv)
-        # self.last_conv_layers = nn.ModuleList([
-        #     nn.ReLU(inplace=True),
-        #     Conv1d1x1(skip_out_channels, skip_out_channels,
-        #               weight_normalization=weight_normalization),
-        #     nn.ReLU(inplace=True),
-        #     Conv1d1x1(skip_out_channels, out_channels,
-        #               weight_normalization=weight_normalization),
-        # ])
+        assert (not scalar_input)
 
-        assert scalar_input is False
+        self.fft_layers = nn.ModuleList()
+        for layer in range(layers):
+            conv_l = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+            conv_r = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+            post_conv = nn.ModuleList([nn.ReLU(inplace=True), Conv1d1x1(in_channels, out_channels), nn.ReLU(inplace=True)])
+            conv_layer = nn.ModuleList([conv_l, conv_r, post_conv])
 
-        self.layers = nn.ModuleList()
-        rnn = nn.GRUCell(out_channels, gru_hidden_size)
-        self.layers.append(rnn)
-        linear1=nn.Linear()
+            # for local conditioning add two more convolutions
+            if self.cin_channels>0:
+                conv_cond_l = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+                conv_cond_r = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+                post_cond_conv = nn.ModuleList([nn.ReLU(inplace=True), Conv1d1x1(in_channels, out_channels), nn.ReLU(inplace=True)])
+                conv_layer.append(conv_cond_l)
+                conv_layer.append(conv_cond_r)
+                conv_layer.append(post_cond_conv)
 
-        if gin_channels > 0 and use_speaker_embedding:
-            assert n_speakers is not None
-            self.embed_speakers = Embedding(
-                n_speakers, gin_channels, padding_idx=None, std=0.1)
-        else:
-            self.embed_speakers = None
+            self.fft_layers.append(conv_layer)
 
-        # Upsample conv net
-        if upsample_conditional_features:
-            self.upsample_conv = nn.ModuleList()
-            for s in upsample_scales:
-                freq_axis_padding = (freq_axis_kernel_size - 1) // 2
-                convt = ConvTranspose2d(1, 1, (freq_axis_kernel_size, s),
-                                        padding=(freq_axis_padding, 0),
-                                        dilation=1, stride=(1, s),
-                                        weight_normalization=weight_normalization)
-                self.upsample_conv.append(convt)
-                # assuming we use [0, 1] scaled features
-                # this should avoid non-negative upsampling output
-                self.upsample_conv.append(nn.ReLU(inplace=True))
-        else:
-            self.upsample_conv = None
+        self.last_layer = nn.ModuleList([
+            nn.Linear(out_channels, out_channels)
+        ])
 
-        # self.receptive_field = receptive_field_size(layers, stacks, kernel_size)
+        assert (not use_speaker_embedding)
+        self.embed_speakers = None
+        self.receptive_field = receptive_field_size(layers)
 
     def has_speaker_embedding(self):
         return self.embed_speakers is not None
@@ -161,10 +134,10 @@ class WaveRNN(nn.Module):
         """Forward step
 
         Args:
-            x (Variable): One-hot encoded audio signal, shape (B x C x T)
-            c (Variable): Local conditioning features,
+            x (Tensor): One-hot encoded audio signal, shape (B x C x T)
+            c (Tensor): Local conditioning features,
               shape (B x cin_channels x T)
-            g (Variable): Global conditioning features,
+            g (Tensor): Global conditioning features,
               shape (B x gin_channels x 1) or speaker Ids of shape (B x 1).
               Note that ``self.use_speaker_embedding`` must be False when you
               want to disable embedding layer and use external features
@@ -174,33 +147,18 @@ class WaveRNN(nn.Module):
             softmax (bool): Whether applies softmax or not.
 
         Returns:
-            Variable: output, shape B x out_channels x T
+            Tensor: output, shape B x out_channels x T
         """
-        B, _, T = x.size()
+        B, n_outchannels, T = x.size()
 
-        if g is not None:
-            if self.embed_speakers is not None:
-                # (B x 1) -> (B x 1 x gin_channels)
-                g = self.embed_speakers(g.view(B, -1))
-                # (B x gin_channels x 1)
-                g = g.transpose(1, 2)
-                assert g.dim() == 3
-        # Expand global conditioning features to all time steps
-        g_bct = _expand_global_features(B, T, g, bct=True)
+        g_bct = None
 
-        if c is not None and self.upsample_conv is not None:
-            # B x 1 x C x T
-            c = c.unsqueeze(1)
-            for f in self.upsample_conv:
-                c = f(c)
-            # B x C x T
-            c = c.squeeze(1)
-            assert c.size(-1) == x.size(-1)
+        #pad with zeros
+        x_pad = dummy_silence().repeat(B,1)
+        x = torch.cat((x_pad,x), 2)
 
-        # Feed data to network
-        x = self.first_conv(x)
         skips = None
-        for f in self.conv_layers:
+        for f in self.fft_layers:
             x, h = f(x, c, g_bct)
             if skips is None:
                 skips = h
@@ -228,11 +186,11 @@ class WaveRNN(nn.Module):
         Input of each time step will be of shape (B x 1 x C).
 
         Args:
-            initial_input (Variable): Initial decoder input, (B x C x 1)
-            c (Variable): Local conditioning features, shape (B x C' x T)
-            g (Variable): Global conditioning features, shape (B x C'' or B x C''x 1)
+            initial_input (Tensor): Initial decoder input, (B x C x 1)
+            c (Tensor): Local conditioning features, shape (B x C' x T)
+            g (Tensor): Global conditioning features, shape (B x C'' or B x C''x 1)
             T (int): Number of time steps to generate.
-            test_inputs (Variable): Teacher forcing inputs (for debugging)
+            test_inputs (Tensor): Teacher forcing inputs (for debugging)
             tqdm (lamda) : tqdm
             softmax (bool) : Whether applies softmax or not
             quantize (bool): Whether quantize softmax output before feeding the
@@ -240,8 +198,8 @@ class WaveRNN(nn.Module):
             log_scale_min (float):  Log scale minimum value.
 
         Returns:
-            Variable: Generated one-hot encoded samples. B x C x T　
-              or scaler vector B x 1 x T
+            Tensor: Generated one-hot encoded samples. B x C x T　
+              or scalar vector B x 1 x T
         """
         self.clear_buffer()
         B = 1
@@ -275,7 +233,6 @@ class WaveRNN(nn.Module):
 
         # Local conditioning
         if c is not None and self.upsample_conv is not None:
-            assert c is not None
             # B x 1 x C x T
             c = c.unsqueeze(1)
             for f in self.upsample_conv:
@@ -289,9 +246,9 @@ class WaveRNN(nn.Module):
         outputs = []
         if initial_input is None:
             if self.scalar_input:
-                initial_input = Variable(torch.zeros(B, 1, 1))
+                initial_input = torch.zeros(B, 1, 1)
             else:
-                initial_input = Variable(torch.zeros(B, 1, self.out_channels))
+                initial_input = torch.zeros(B, 1, self.out_channels)
                 initial_input[:, :, 127] = 1  # TODO: is this ok?
             # https://github.com/pytorch/pytorch/issues/584#issuecomment-275169567
             if next(self.parameters()).is_cuda:
@@ -301,6 +258,7 @@ class WaveRNN(nn.Module):
                 initial_input = initial_input.transpose(1, 2).contiguous()
 
         current_input = initial_input
+
         for t in tqdm(range(T)):
             if test_inputs is not None and t < test_inputs.size(1):
                 current_input = test_inputs[:, t, :].unsqueeze(1)
@@ -315,7 +273,7 @@ class WaveRNN(nn.Module):
             x = current_input
             x = self.first_conv.incremental_forward(x)
             skips = None
-            for f in self.conv_layers:
+            for f in self.fft_layers:
                 x, h = f.incremental_forward(x, ct, gt)
                 skips = h if skips is None else (skips + h) * math.sqrt(0.5)
             x = skips
@@ -336,8 +294,7 @@ class WaveRNN(nn.Module):
                         np.arange(self.out_channels), p=x.view(-1).data.cpu().numpy())
                     x.zero_()
                     x[:, sample] = 1.0
-            outputs += [x]
-
+            outputs += [x.data]
         # T x B x C
         outputs = torch.stack(outputs)
         # B x C x T
@@ -348,7 +305,7 @@ class WaveRNN(nn.Module):
 
     def clear_buffer(self):
         self.first_conv.clear_buffer()
-        for f in self.conv_layers:
+        for f in self.fft_layers:
             f.clear_buffer()
         for f in self.last_conv_layers:
             try:

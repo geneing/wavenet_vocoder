@@ -1,3 +1,4 @@
+import torch
 import librosa
 import librosa.filters
 import math
@@ -5,6 +6,9 @@ import numpy as np
 from scipy import signal
 from hparams import hparams
 from scipy.io import wavfile
+from nnmnkwii import preprocessing as P
+from wavenet_vocoder.util import is_mulaw_quantize, is_mulaw
+from keras.utils import np_utils
 
 import lws
 
@@ -139,3 +143,23 @@ def _normalize(S):
 
 def _denormalize(S):
     return (np.clip(S, 0, 1) * -hparams.min_level_db) + hparams.min_level_db
+
+def dummy_silence():
+    # Dummy silence
+    if is_mulaw_quantize(hparams.input_type):
+        initial_value = P.mulaw_quantize(0, hparams.quantize_channels)
+    elif is_mulaw(hparams.input_type):
+        initial_value = P.mulaw(0.0, hparams.quantize_channels)
+    else:
+        initial_value = 0.0
+    print("Intial value:", initial_value)
+
+    # (C,)
+    if is_mulaw_quantize(hparams.input_type):
+        initial_input = np_utils.to_categorical(
+            initial_value, num_classes=hparams.quantize_channels).astype(np.float32)
+        initial_input = torch.from_numpy(initial_input).view(
+            1, 1, hparams.quantize_channels)
+    else:
+        initial_input = torch.zeros(1, 1, 1).fill_(initial_value)
+    return initial_input

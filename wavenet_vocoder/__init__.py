@@ -5,3 +5,4 @@ from .version import __version__
 
 from .wavenet import receptive_field_size, WaveNet
 from .wavernn import WaveRNN
+from .fftnet import FFTNet
