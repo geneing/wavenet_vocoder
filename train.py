@@ -507,23 +507,7 @@ def eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_
         g = g[idx]
         print("Shape of global conditioning features: {}".format(g.size()))
 
-    # Dummy silence
-    if is_mulaw_quantize(hparams.input_type):
-        initial_value = P.mulaw_quantize(0, hparams.quantize_channels)
-    elif is_mulaw(hparams.input_type):
-        initial_value = P.mulaw(0.0, hparams.quantize_channels)
-    else:
-        initial_value = 0.0
-    print("Intial value:", initial_value)
-
-    # (C,)
-    if is_mulaw_quantize(hparams.input_type):
-        initial_input = np_utils.to_categorical(
-            initial_value, num_classes=hparams.quantize_channels).astype(np.float32)
-        initial_input = torch.from_numpy(initial_input).view(
-            1, 1, hparams.quantize_channels)
-    else:
-        initial_input = torch.zeros(1, 1, 1).fill_(initial_value)
+    initial_input = audio.dummy_silence()
     initial_input = initial_input.to(device)
 
     # Run the model in fast eval mode

@@ -45,3 +45,18 @@ def wavernn( hparams ):
                     )
 
     return model
+
+
+def fftnet( hparams ):
+    from wavenet_vocoder import FFTNet
+    model = FFTNet(in_channels=hparams.quantize_channels , out_channels=hparams.out_channels,
+                   layers=hparams.layers,
+                   cin_channels=hparams.cin_channels,
+                   gin_channels=hparams.gin_channels,
+                   n_speakers=hparams.n_speakers,
+                   dropout=hparams.dropout,
+                   upsample_conditional_features=hparams.upsample_conditional_features,
+                   scalar_input=is_scalar_input(hparams.input_type))
+
+    return model
+

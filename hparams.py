@@ -9,7 +9,7 @@ hparams = tf.contrib.training.HParams(
     name="wavenet_vocoder",
 
     # Convenient model builder
-    builder="wavenet",
+    builder="fftnet",
 
     # Input type:
     # 1. raw [-1, 1]
@@ -20,8 +20,8 @@ hparams = tf.contrib.training.HParams(
     # input and softmax output are assumed.
     # **NOTE**: if you change the one of the two parameters below, you need to
     # re-run preprocessing before training.
-    input_type="raw",
-    quantize_channels=65536,  # 65536 or 256
+    input_type="mulaw-quantize",
+    quantize_channels=256,  # 65536 or 256
 
     # Audio:
     sample_rate=22050,
@@ -52,8 +52,8 @@ hparams = tf.contrib.training.HParams(
     # Model:
     # This should equal to `quantize_channels` if mu-law quantize enabled
     # otherwise num_mixture * 3 (pi, mean, log_scale)
-    out_channels=10 * 3,
-    layers=24,
+    out_channels=256, #quantize_channels
+    layers=11, #11 FFT layers for 2048 receptive field
     stacks=4,
     residual_channels=512,
     gate_channels=512,  # split into 2 gropus internally for gated activation
