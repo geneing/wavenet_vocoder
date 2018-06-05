@@ -12,7 +12,7 @@ from .modules import Embedding
 
 from .modules import Conv1d1x1, ResidualConv1dGLU, ConvTranspose2d
 from .mixture import sample_from_discretized_mix_logistic
-from audio import dummy_silence
+import audio
 
 def _expand_global_features(B, T, g, bct=True):
     """Expand global conditioning features to all time steps
@@ -154,7 +154,7 @@ class FFTNet(nn.Module):
         g_bct = None
 
         #pad with zeros
-        x_pad = dummy_silence().unsqueeze(-1).repeat(B,1).unsqueeze(2).repeat(self.receptive_field,)
+        x_pad = audio.dummy_silence().unsqueeze(-1).repeat(B,1).unsqueeze(2).repeat(self.receptive_field,)
         x = torch.cat((x_pad,x), 2)
 
         skips = None
