@@ -154,7 +154,7 @@ class FFTNet(nn.Module):
         g_bct = None
 
         #pad with zeros
-        x_pad = audio.dummy_silence().unsqueeze(-1).repeat(B,1).unsqueeze(2).repeat(self.receptive_field,)
+        x_pad = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1).repeat(B,1,self.receptive_field)
         x = torch.cat((x_pad,x), 2)
 
         skips = None
