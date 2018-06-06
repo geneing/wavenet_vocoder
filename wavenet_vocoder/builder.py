@@ -71,7 +71,7 @@ def fftnet( hparams ):
                    n_speakers=hparams.n_speakers,
                    dropout=hparams.dropout,
                    upsample_conditional_features=hparams.upsample_conditional_features,
-                   scalar_input=is_scalar_input(hparams.input_type))
+                   scalar_input=is_scalar_input(hparams.input_type), hop_size=hparams.hop_size)
 
     return model
 

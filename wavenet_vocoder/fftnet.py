@@ -91,12 +91,14 @@ class FFTNet(nn.Module):
                  cin_channels=-1, gin_channels=-1, n_speakers=None,
                  upsample_conditional_features=False,
                  use_speaker_embedding=False,
-                 scalar_input=False
+                 scalar_input=False,
+                 hop_size=256
                  ):
         super(FFTNet, self).__init__()
         self.out_channels = out_channels
         self.cin_channels = cin_channels
         assert (not scalar_input)
+        self.hop_size = hop_size
 
         self.fft_layers = nn.ModuleList()
         for layer in range(layers):
@@ -153,23 +155,26 @@ class FFTNet(nn.Module):
 
         g_bct = None
 
-        #pad with zeros
+        #TODO: pad with silence as per fftnet paper
+        #pad signal with enough zeros to start
         x_pad = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1).repeat(B,1,self.receptive_field)
         x = torch.cat((x_pad,x), 2)
 
-        skips = None
-        for f in self.fft_layers:
-            x, h = f(x, c, g_bct)
-            if skips is None:
-                skips = h
-            else:
-                skips += h
-                skips *= math.sqrt(0.5)
-            # skips = h if skips is None else (skips + h) * math.sqrt(0.5)
+        #pad conditioning too
+        if (c is not None) and (self.cin_channels>0) :
+            n_cond_pad = self.receptive_field / self.hop_size
+            c_pad = torch.zeros([B, self.cin_channels, n_cond_pad])
+            c=torch.cat((c_pad,c),2)
 
-        x = skips
-        for f in self.last_conv_layers:
-            x = f(x)
+        for t in range(T):
+
+            npts = self.receptive_field
+            for f in self.fft_layers:
+                step1 = f[0](x[t:(t+npts/2.)])+f[1](x[(t+npts/2.):])
+                x, h = f(x, c, g_bct)
+
+            for f in self.last_conv_layers:
+                x = f(x)
 
         x = F.softmax(x, dim=1) if softmax else x
 
