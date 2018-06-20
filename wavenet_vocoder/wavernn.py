@@ -8,10 +8,7 @@ import torch
 from torch import nn
 from torch.autograd import Variable
 from torch.nn import functional as F
-
-from deepvoice3_pytorch.modules import Embedding
-
-from .modules import Conv1d1x1, ResidualConv1dGLU, ConvTranspose2d
+from .modules import Embedding
 from .mixture import sample_from_discretized_mix_logistic
 
 
@@ -75,81 +72,42 @@ class WaveRNN(nn.Module):
           directly.
     """
 
-    def __init__(self, out_channels=256,
-                 gru_hidden_size=512,
-                 dropout=1 - 0.95,
+    def __init__(self, in_channels=256, out_channels=256,
+                 gru_hidden_size=896,
                  cin_channels=-1, gin_channels=-1, n_speakers=None,
-                 weight_normalization=True,
-                 upsample_conditional_features=False,
-                 upsample_scales=None,
-                 freq_axis_kernel_size=3,
-                 scalar_input=False,
-                 use_speaker_embedding=True,
+                 dropout=False,
+                 scalar_input=False, hop_size=1
                  ):
         super(WaveRNN, self).__init__()
         self.scalar_input = scalar_input
         self.out_channels = out_channels
         self.cin_channels = cin_channels
-        # assert layers % stacks == 0
-        # layers_per_stack = layers // stacks
-        # if scalar_input:
-        #     self.first_conv = Conv1d1x1(1, residual_channels)
-        # else:
-        #     self.first_conv = Conv1d1x1(out_channels, residual_channels)
-        #
-        # self.fft_layers = nn.ModuleList()
-        # for layer in range(layers):
-        #     dilation = 2**(layer % layers_per_stack)
-        #     conv = ResidualConv1dGLU(
-        #         residual_channels, gate_channels,
-        #         kernel_size=kernel_size,
-        #         skip_out_channels=skip_out_channels,
-        #         bias=True,  # magenda uses bias, but musyoku doesn't
-        #         dilation=dilation, dropout=dropout,
-        #         cin_channels=cin_channels,
-        #         gin_channels=gin_channels,
-        #         weight_normalization=weight_normalization)
-        #     self.fft_layers.append(conv)
-        # self.last_conv_layers = nn.ModuleList([
-        #     nn.ReLU(inplace=True),
-        #     Conv1d1x1(skip_out_channels, skip_out_channels,
-        #               weight_normalization=weight_normalization),
-        #     nn.ReLU(inplace=True),
-        #     Conv1d1x1(skip_out_channels, out_channels,
-        #               weight_normalization=weight_normalization),
-        # ])
+        self.hidden_size = gru_hidden_size
+        self.hop_size = hop_size
 
-        assert scalar_input is False
+        assert (not scalar_input)
+
+        cond_channels = cin_channels if cin_channels > 0 else 0
+        cond_channels += gin_channels if gin_channels > 0 else 0
 
         self.layers = nn.ModuleList()
-        rnn = nn.GRUCell(out_channels, gru_hidden_size)
+        rnn = nn.GRU(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, num_layers=1,
+                     bias=True, batch_first=True, dropout=dropout)
         self.layers.append(rnn)
-        linear1=nn.Linear()
 
-        if gin_channels > 0 and use_speaker_embedding:
+        linear1 = nn.Linear(self.hidden_size, self.hidden_size)
+        self.layers.append(nn.ReLU(linear1))
+
+        linear2 = nn.Linear(self.hidden_size, self.out_channels)
+        self.layers.append(linear2)
+
+        if gin_channels > 0:
             assert n_speakers is not None
             self.embed_speakers = Embedding(
                 n_speakers, gin_channels, padding_idx=None, std=0.1)
         else:
             self.embed_speakers = None
 
-        # Upsample conv net
-        if upsample_conditional_features:
-            self.upsample_conv = nn.ModuleList()
-            for s in upsample_scales:
-                freq_axis_padding = (freq_axis_kernel_size - 1) // 2
-                convt = ConvTranspose2d(1, 1, (freq_axis_kernel_size, s),
-                                        padding=(freq_axis_padding, 0),
-                                        dilation=1, stride=(1, s),
-                                        weight_normalization=weight_normalization)
-                self.upsample_conv.append(convt)
-                # assuming we use [0, 1] scaled features
-                # this should avoid non-negative upsampling output
-                self.upsample_conv.append(nn.ReLU(inplace=True))
-        else:
-            self.upsample_conv = None
-
-        # self.receptive_field = receptive_field_size(layers, stacks, kernel_size)
 
     def has_speaker_embedding(self):
         return self.embed_speakers is not None
@@ -176,7 +134,8 @@ class WaveRNN(nn.Module):
         Returns:
             Variable: output, shape B x out_channels x T
         """
-        B, _, T = x.size()
+        B, n_outchannels, T = x.size()
+        output = torch.zeros_like(x,requires_grad=True)
 
         if g is not None:
             if self.embed_speakers is not None:

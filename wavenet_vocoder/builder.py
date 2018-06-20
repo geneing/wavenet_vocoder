@@ -46,25 +46,20 @@ def wavenet(out_channels=256,
 
 def wavernn( hparams ):
     from wavenet_vocoder import WaveRNN
-    model = WaveRNN(out_channels=hparams.out_channels,
+    model = WaveRNN(in_channels=hparams.quantize_channels, out_channels=hparams.out_channels,
                     gru_hidden_size=hparams.gru_hidden_size,
                     cin_channels=hparams.cin_channels,
                     gin_channels=hparams.gin_channels,
-                    weight_normalization=hparams.weight_normalization,
                     n_speakers=hparams.n_speakers,
                     dropout=hparams.dropout,
-                    upsample_conditional_features=hparams.upsample_conditional_features,
-                    upsample_scales=hparams.upsample_scales,
-                    freq_axis_kernel_size=hparams.freq_axis_kernel_size,
-                    scalar_input=is_scalar_input(hparams.input_type)
-                    )
+                    scalar_input=is_scalar_input(hparams.input_type), hop_size=hparams.hop_size)
 
     return model
 
 
 def fftnet( hparams ):
     from wavenet_vocoder import FFTNet
-    model = FFTNet(in_channels=hparams.quantize_channels , out_channels=hparams.out_channels,
+    model = FFTNet(in_channels=hparams.quantize_channels, out_channels=hparams.out_channels,
                    layers=hparams.layers,
                    cin_channels=hparams.cin_channels,
                    gin_channels=hparams.gin_channels,
