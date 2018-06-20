@@ -101,21 +101,18 @@ class FFTNet(nn.Module):
         self.hop_size = hop_size
 
         self.fft_layers = nn.ModuleList()
+        # for local conditioning add two more convolutions
+        if self.cin_channels>0:
+            conv_cond_l = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+            conv_cond_r = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
+            self.cond_layer = nn.ModuleList([conv_cond_l, conv_cond_r])
+
+
         for layer in range(layers):
             conv_l = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
             conv_r = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
             post_conv = nn.ModuleList([nn.ReLU(inplace=True), Conv1d1x1(in_channels, out_channels), nn.ReLU(inplace=True)])
             conv_layer = nn.ModuleList([conv_l, conv_r, post_conv])
-
-            # for local conditioning add two more convolutions
-            if self.cin_channels>0:
-                conv_cond_l = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
-                conv_cond_r = nn.ModuleList([Conv1d1x1(in_channels, out_channels)])
-                post_cond_conv = nn.ModuleList([nn.ReLU(inplace=True), Conv1d1x1(in_channels, out_channels), nn.ReLU(inplace=True)])
-                conv_layer.append(conv_cond_l)
-                conv_layer.append(conv_cond_r)
-                conv_layer.append(post_cond_conv)
-
             self.fft_layers.append(conv_layer)
 
         self.last_layer = nn.ModuleList([
@@ -152,33 +149,41 @@ class FFTNet(nn.Module):
             Tensor: output, shape B x out_channels x T
         """
         B, n_outchannels, T = x.size()
-
+        output = torch.zeros_like(x,requires_grad=True)
         g_bct = None
 
         #TODO: pad with silence as per fftnet paper
         #pad signal with enough zeros to start
-        x_pad = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1).repeat(B,1,self.receptive_field)
+        x_pad = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1).repeat(B, 1, self.receptive_field)
         x = torch.cat((x_pad,x), 2)
 
         #pad conditioning too
-        if (c is not None) and (self.cin_channels>0) :
+        if (c is not None) and (self.cin_channels > 0) :
             n_cond_pad = self.receptive_field / self.hop_size
             c_pad = torch.zeros([B, self.cin_channels, n_cond_pad])
-            c=torch.cat((c_pad,c),2)
+            c=torch.cat((c_pad, c), 2)
 
         for t in range(T):
-
             npts = self.receptive_field
+            xc = x[t:t+npts]
+            cond = None
+            if c is not None:
+                cc = c[t:t+npts]
+                cond = self.cond_layer[0](cc[0:npts/2])+self.cond_layer[1](cc[npts/2:])
+
             for f in self.fft_layers:
-                step1 = f[0](x[t:(t+npts/2.)])+f[1](x[(t+npts/2.):])
-                x, h = f(x, c, g_bct)
+                npts /= 2.
+                z = f[0](xc[0:npts])+f[1](xc[npts:])
+                if cond is not None:
+                    z += cond
+                    cond = None
 
-            for f in self.last_conv_layers:
-                x = f(x)
+                xc = f[3](z)
+            for f in self.last_layer:
+                xc = f(xc)
 
-        x = F.softmax(x, dim=1) if softmax else x
-
-        return x
+            output[:, :, t] = F.softmax(xc, dim=1) if softmax else xc
+        return output
 
     def incremental_forward(self, initial_input=None, c=None, g=None,
                             T=100, test_inputs=None,
