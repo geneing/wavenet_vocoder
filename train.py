@@ -765,7 +765,7 @@ def build_model():
         s += "Notice that upsample conv layers will never be used."
         warn(s)
 
-    model = getattr(builder, hparams)
+    model = getattr(builder, hparams.builder)(hparams)
     return model
 
 

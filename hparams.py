@@ -68,6 +68,7 @@ hparams = tf.contrib.training.HParams(
     # Ref: https://github.com/r9y9/wavenet_vocoder/pull/73
     legacy=True,
 
+
     # Local conditioning (set negative value to disable))
     cin_channels=80,
     # If True, use transposed convolutions to upsample conditional features,
