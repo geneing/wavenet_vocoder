@@ -147,13 +147,12 @@ class WaveRNN(nn.Module):
         # Expand global conditioning features to all time steps
         g_bct = _expand_global_features(B, T, g, bct=True)
 
-        if c is not None and self.upsample_conv is not None:
-            # B x 1 x C x T
-            c = c.unsqueeze(1)
-            for f in self.upsample_conv:
-                c = f(c)
-            # B x C x T
-            c = c.squeeze(1)
+        if c is not None:
+            c_upsample = torch.zeros_like(x, requires_grad=False)
+            # B x C x Thop_size
+            for i in range(T):
+                # upsampling through linear interpolation
+                c_upsample[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
             assert c.size(-1) == x.size(-1)
 
         # Feed data to network
