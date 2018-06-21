@@ -144,19 +144,23 @@ class WaveRNN(nn.Module):
                 # (B x gin_channels x 1)
                 g = g.transpose(1, 2)
                 assert g.dim() == 3
-        # Expand global conditioning features to all time steps
-        g_bct = _expand_global_features(B, T, g, bct=True)
+
+                # Expand global conditioning features to all time steps
+                g_bct = _expand_global_features(B, T, g, bct=True)
+                x = torch.cat((x,g_bct),2)
 
         if c is not None:
-            c_upsample = torch.zeros_like(x, requires_grad=False)
-            # B x C x Thop_size
+            # B x C x T
+            c_bct = torch.zeros_like(x, requires_grad=False)
+
             for i in range(T):
                 # upsampling through linear interpolation
-                c_upsample[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
+                c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
             assert c.size(-1) == x.size(-1)
+            x = torch.cat((x, c_bct), 2)
+
 
         # Feed data to network
-        x = self.first_conv(x)
         skips = None
         for f in self.conv_layers:
             x, h = f(x, c, g_bct)
