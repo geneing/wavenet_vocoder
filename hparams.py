@@ -9,7 +9,7 @@ hparams = tf.contrib.training.HParams(
     name="wavenet_vocoder",
 
     # Convenient model builder
-    builder="fftnet",
+    builder="wavernn",
 
     # Input type:
     # 1. raw [-1, 1]
