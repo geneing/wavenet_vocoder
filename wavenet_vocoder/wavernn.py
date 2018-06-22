@@ -10,7 +10,7 @@ from torch.autograd import Variable
 from torch.nn import functional as F
 from .modules import Embedding
 from .mixture import sample_from_discretized_mix_logistic
-
+import audio
 
 def _expand_global_features(B, T, g, bct=True):
     """Expand global conditioning features to all time steps
@@ -42,34 +42,14 @@ class WaveRNN(nn.Module):
         out_channels (int): Output channels. If input_type is mu-law quantized
           one-hot vecror. this must equal to the quantize channels. Other wise
           num_mixtures x 3 (pi, mu, log_scale).
-        layers (int): Number of total layers
-        stacks (int): Number of dilation cycles
-        residual_channels (int): Residual input / output channels
-        gate_channels (int): Gated activation channels.
-        skip_out_channels (int): Skip connection channels.
-        kernel_size (int): Kernel size of convolution layers.
-        dropout (float): Dropout probability.
         cin_channels (int): Local conditioning channels. If negative value is
           set, local conditioning is disabled.
         gin_channels (int): Global conditioning channels. If negative value is
           set, global conditioning is disabled.
         n_speakers (int): Number of speakers. Used only if global conditioning
           is enabled.
-        weight_normalization (bool): If True, DeepVoice3-style weight
-          normalization is applied.
-        upsample_conditional_features (bool): Whether upsampling local
-          conditioning features by transposed convolution layers or not.
-        upsample_scales (list): List of upsample scale.
-          ``np.prod(upsample_scales)`` must equal to hop size. Used only if
-          upsample_conditional_features is enabled.
-        freq_axis_kernel_size (int): Freq-axis kernel_size for transposed
-          convolution layers for upsampling. If you only care about time-axis
-          upsampling, set this to 1.
         scalar_input (Bool): If True, scalar input ([-1, 1]) is expected, otherwise
           quantized one-hot vector is expected.
-        use_speaker_embedding (Bool): Use speaker embedding or Not. Set to False
-          if you want to disable embedding layer and use external features
-          directly.
     """
 
     def __init__(self, in_channels=256, out_channels=256,
@@ -91,8 +71,8 @@ class WaveRNN(nn.Module):
         cond_channels += gin_channels if gin_channels > 0 else 0
 
         self.layers = nn.ModuleList()
-        rnn = nn.GRU(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, num_layers=1,
-                     bias=True, batch_first=True, dropout=dropout)
+        rnn = nn.GRUCell(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, num_layers=1,
+                     bias=True)
         self.layers.append(rnn)
 
         linear1 = nn.Linear(self.hidden_size, self.hidden_size)
@@ -149,6 +129,7 @@ class WaveRNN(nn.Module):
                 g_bct = _expand_global_features(B, T, g, bct=True)
                 x = torch.cat((x,g_bct),2)
 
+        # Local Conditioning
         if c is not None:
             # B x C x T
             c_bct = torch.zeros_like(x, requires_grad=False)
@@ -156,28 +137,17 @@ class WaveRNN(nn.Module):
             for i in range(T):
                 # upsampling through linear interpolation
                 c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
-            assert c.size(-1) == x.size(-1)
+            assert c_bct.size(-1) == x.size(-1)
             x = torch.cat((x, c_bct), 2)
 
-
         # Feed data to network
-        skips = None
-        for f in self.conv_layers:
-            x, h = f(x, c, g_bct)
-            if skips is None:
-                skips = h
-            else:
-                skips += h
-                skips *= math.sqrt(0.5)
-            # skips = h if skips is None else (skips + h) * math.sqrt(0.5)
+        for t in range(T):
+            hidden = self.layers[0](x, hidden)
+            lin1 = self.layers[1](hidden)
+            lin2 = self.layers[2](lin1)
+            output[:, :, t] = F.softmax(lin2, dim=1) if softmax else lin2
 
-        x = skips
-        for f in self.last_conv_layers:
-            x = f(x)
-
-        x = F.softmax(x, dim=1) if softmax else x
-
-        return x
+        return output
 
     def incremental_forward(self, initial_input=None, c=None, g=None,
                             T=100, test_inputs=None,
@@ -203,89 +173,71 @@ class WaveRNN(nn.Module):
 
         Returns:
             Variable: Generated one-hot encoded samples. B x C x T　
-              or scaler vector B x 1 x T
+              or scalar vector B x 1 x T
         """
         self.clear_buffer()
         B = 1
 
-        # Note: shape should be **(B x T x C)**, not (B x C x T) opposed to
-        # batch forward due to linealized convolution
+        # shape (B x C x T)
         if test_inputs is not None:
-            if self.scalar_input:
-                if test_inputs.size(1) == 1:
-                    test_inputs = test_inputs.transpose(1, 2).contiguous()
-            else:
-                if test_inputs.size(1) == self.out_channels:
-                    test_inputs = test_inputs.transpose(1, 2).contiguous()
-
             B = test_inputs.size(0)
             if T is None:
-                T = test_inputs.size(1)
+                T = test_inputs.size(2)
             else:
-                T = max(T, test_inputs.size(1))
+                T = max(T, test_inputs.size(2))
         # cast to int in case of numpy.int64...
         T = int(T)
 
         # Global conditioning
         if g is not None:
             if self.embed_speakers is not None:
+                # (B x 1) -> (B x 1 x gin_channels)
                 g = self.embed_speakers(g.view(B, -1))
-                # (B x gin_channels, 1)
+                # (B x gin_channels x 1)
                 g = g.transpose(1, 2)
                 assert g.dim() == 3
-        g_btc = _expand_global_features(B, T, g, bct=False)
 
-        # Local conditioning
-        if c is not None and self.upsample_conv is not None:
-            assert c is not None
-            # B x 1 x C x T
-            c = c.unsqueeze(1)
-            for f in self.upsample_conv:
-                c = f(c)
+                # Expand global conditioning features to all time steps
+                g_bct = _expand_global_features(B, T, g, bct=True)
+
+        # Local Conditioning
+        if c is not None:
             # B x C x T
-            c = c.squeeze(1)
-            assert c.size(-1) == T
-        if c is not None and c.size(-1) == T:
-            c = c.transpose(1, 2).contiguous()
+            c_bct = torch.zeros_like(x, requires_grad=False)
+
+            for i in range(T):
+                # upsampling through linear interpolation
+                c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
+            assert c_bct.size(-1) == x.size(-1)
 
         outputs = []
         if initial_input is None:
             if self.scalar_input:
                 initial_input = Variable(torch.zeros(B, 1, 1))
             else:
-                initial_input = Variable(torch.zeros(B, 1, self.out_channels))
-                initial_input[:, :, 127] = 1  # TODO: is this ok?
+                initial_input = Variable(torch.zeros(B, self.out_channels, 1))
+                initial_input = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1)  # TODO: is this ok?
             # https://github.com/pytorch/pytorch/issues/584#issuecomment-275169567
             if next(self.parameters()).is_cuda:
                 initial_input = initial_input.cuda()
-        else:
-            if initial_input.size(1) == self.out_channels:
-                initial_input = initial_input.transpose(1, 2).contiguous()
 
         current_input = initial_input
         for t in tqdm(range(T)):
-            if test_inputs is not None and t < test_inputs.size(1):
-                current_input = test_inputs[:, t, :].unsqueeze(1)
+            if test_inputs is not None and t < test_inputs.size(2):
+                current_input = test_inputs[:, :, t].unsqueeze(-1)
             else:
                 if t > 0:
                     current_input = outputs[-1]
 
             # Conditioning features for single time step
-            ct = None if c is None else c[:, t, :].unsqueeze(1)
-            gt = None if g is None else g_btc[:, t, :].unsqueeze(1)
+            ct = None if c is None else c_bct[:, :, t].unsqueeze(-1)
+            gt = None if g is None else g_bct[:, :, t].unsqueeze(-1)
 
-            x = current_input
-            x = self.first_conv.incremental_forward(x)
-            skips = None
-            for f in self.conv_layers:
-                x, h = f.incremental_forward(x, ct, gt)
-                skips = h if skips is None else (skips + h) * math.sqrt(0.5)
-            x = skips
-            for f in self.last_conv_layers:
-                try:
-                    x = f.incremental_forward(x)
-                except AttributeError:
-                    x = f(x)
+            x = torch.cat((current_input, gt, ct), 2)
+
+            hidden = self.layers[0](x, hidden)
+            lin1 = self.layers[1](hidden)
+            x = self.layers[2](lin1)
 
             # Generate next input by sampling
             if self.scalar_input:
@@ -309,19 +261,8 @@ class WaveRNN(nn.Module):
         return outputs
 
     def clear_buffer(self):
-        self.first_conv.clear_buffer()
-        for f in self.conv_layers:
-            f.clear_buffer()
-        for f in self.last_conv_layers:
+        for f in self.layers:
             try:
                 f.clear_buffer()
             except AttributeError:
                 pass
-
-    def make_generation_fast_(self):
-        def remove_weight_norm(m):
-            try:
-                nn.utils.remove_weight_norm(m)
-            except ValueError:  # this module didn't have weight norm
-                return
-        self.apply(remove_weight_norm)
