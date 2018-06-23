@@ -64,6 +64,7 @@ class WaveRNN(nn.Module):
         self.cin_channels = cin_channels
         self.hidden_size = gru_hidden_size
         self.hop_size = hop_size
+        self.receptive_field = 0 #doesn't make sense for wavernn
 
         assert (not scalar_input)
 
@@ -71,8 +72,7 @@ class WaveRNN(nn.Module):
         cond_channels += gin_channels if gin_channels > 0 else 0
 
         self.layers = nn.ModuleList()
-        rnn = nn.GRUCell(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, num_layers=1,
-                     bias=True)
+        rnn = nn.GRUCell(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True)
         self.layers.append(rnn)
 
         linear1 = nn.Linear(self.hidden_size, self.hidden_size)
