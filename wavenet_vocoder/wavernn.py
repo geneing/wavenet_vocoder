@@ -117,6 +117,7 @@ class WaveRNN(nn.Module):
         """
         B, n_outchannels, T = x.size()
         output = torch.zeros_like(x,requires_grad=True)
+        hidden = torch.zeros((B,self.hidden_size), dtype=x.dtype, device=x.device)
 
         if g is not None:
             if self.embed_speakers is not None:
@@ -128,25 +129,29 @@ class WaveRNN(nn.Module):
 
                 # Expand global conditioning features to all time steps
                 g_bct = _expand_global_features(B, T, g, bct=True)
-                x = torch.cat((x,g_bct),2)
+                x = torch.cat((x,g_bct),1)
 
         # Local Conditioning
         if c is not None:
             if c.size(-1) != x.size(-1):
                 # B x C x T
-                c_bct = torch.zeros_like(x, requires_grad=False)
+                c_bct = torch.zeros((c.size(0), c.size(1), x.size(2)), dtype=x.dtype, requires_grad=False, device=x.device)
 
                 for i in range(T):
                     # upsampling through linear interpolation
-                    c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
+                    try:
+                        c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size-1], c[:,:,i//self.hop_size], 1.-((i/self.hop_size) % 1))
+                    except IndexError:
+                        c_bct[:,:,i] = c[:, :, i//self.hop_size]*((i/self.hop_size) % 1)
+
                 assert c_bct.size(-1) == x.size(-1)
-                x = torch.cat((x, c_bct), 2)
+                x = torch.cat((x, c_bct), 1)
             else:
                 c_bct = c
 
         # Feed data to network
         for t in range(T):
-            hidden = self.layers[0](x, hidden)
+            hidden = self.layers[0](x[:, :, t], hidden)
             lin1 = self.layers[1](hidden)
             lin2 = self.layers[2](lin1)
             output[:, :, t] = F.softmax(lin2, dim=1) if softmax else lin2
