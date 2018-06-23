@@ -55,7 +55,7 @@ class WaveRNN(nn.Module):
     def __init__(self, in_channels=256, out_channels=256,
                  gru_hidden_size=896,
                  cin_channels=-1, gin_channels=-1, n_speakers=None,
-                 dropout=False,
+                 dropout=False, upsample_conditional_features=False,
                  scalar_input=False, hop_size=1
                  ):
         super(WaveRNN, self).__init__()
@@ -65,6 +65,7 @@ class WaveRNN(nn.Module):
         self.hidden_size = gru_hidden_size
         self.hop_size = hop_size
         self.receptive_field = 0 #doesn't make sense for wavernn
+        self.upsample_conditional_features = upsample_conditional_features
 
         assert (not scalar_input)
 
@@ -131,14 +132,17 @@ class WaveRNN(nn.Module):
 
         # Local Conditioning
         if c is not None:
-            # B x C x T
-            c_bct = torch.zeros_like(x, requires_grad=False)
+            if c.size(-1) != x.size(-1):
+                # B x C x T
+                c_bct = torch.zeros_like(x, requires_grad=False)
 
-            for i in range(T):
-                # upsampling through linear interpolation
-                c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
-            assert c_bct.size(-1) == x.size(-1)
-            x = torch.cat((x, c_bct), 2)
+                for i in range(T):
+                    # upsampling through linear interpolation
+                    c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
+                assert c_bct.size(-1) == x.size(-1)
+                x = torch.cat((x, c_bct), 2)
+            else:
+                c_bct = c
 
         # Feed data to network
         for t in range(T):

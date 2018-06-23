@@ -73,7 +73,7 @@ hparams = tf.contrib.training.HParams(
     cin_channels=80,
     # If True, use transposed convolutions to upsample conditional features,
     # otherwise repeat features to adjust time resolution
-    upsample_conditional_features=False,
+    upsample_conditional_features=True,
     # should np.prod(upsample_scales) == hop_size
     upsample_scales=[4, 4, 4, 4],
     # Freq axis kernel size for upsampling network
