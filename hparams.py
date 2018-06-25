@@ -98,7 +98,7 @@ hparams = tf.contrib.training.HParams(
     # Loss
 
     # Training:
-    batch_size=2,
+    batch_size=32,
     adam_beta1=0.9,
     adam_beta2=0.999,
     adam_eps=1e-8,
@@ -107,7 +107,7 @@ hparams = tf.contrib.training.HParams(
     # see lrschedule.py for available lr_schedule
     lr_schedule="noam_learning_rate_decay",
     lr_schedule_kwargs={},  # {"anneal_rate": 0.5, "anneal_interval": 50000},
-    nepochs=2000,
+    nepochs=2,
     weight_decay=0.0,
     clip_thresh=-1,
     # max time steps can either be specified as sec or steps
@@ -121,8 +121,8 @@ hparams = tf.contrib.training.HParams(
 
     # Save
     # per-step intervals
-    checkpoint_interval=1000,
-    train_eval_interval=1000,
+    checkpoint_interval=100,
+    train_eval_interval=100,
     # per-epoch interval
     test_eval_epoch_interval=5,
     save_optimizer_state=True,

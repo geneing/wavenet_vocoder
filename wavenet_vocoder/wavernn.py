@@ -116,7 +116,7 @@ class WaveRNN(nn.Module):
             Variable: output, shape B x out_channels x T
         """
         B, n_outchannels, T = x.size()
-        output = torch.zeros_like(x,requires_grad=True)
+        output = torch.zeros_like(x)
         hidden = torch.zeros((B,self.hidden_size), dtype=x.dtype, device=x.device)
 
         if g is not None:
@@ -212,12 +212,11 @@ class WaveRNN(nn.Module):
         # Local Conditioning
         if c is not None:
             # B x C x T
-            c_bct = torch.zeros_like(x, requires_grad=False)
+            c_bct = torch.zeros((c.size(0), c.size(1), 1), dtype=c.dtype, requires_grad=False, device=c.device)
 
             for i in range(T):
                 # upsampling through linear interpolation
                 c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
-            assert c_bct.size(-1) == x.size(-1)
 
         outputs = []
         if initial_input is None:
@@ -275,3 +274,6 @@ class WaveRNN(nn.Module):
                 f.clear_buffer()
             except AttributeError:
                 pass
+
+    def make_generation_fast_(self):
+        pass
