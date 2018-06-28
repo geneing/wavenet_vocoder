@@ -98,7 +98,7 @@ hparams = tf.contrib.training.HParams(
     # Loss
 
     # Training:
-    batch_size=32,
+    batch_size=2,
     adam_beta1=0.9,
     adam_beta2=0.999,
     adam_eps=1e-8,
@@ -113,7 +113,7 @@ hparams = tf.contrib.training.HParams(
     # max time steps can either be specified as sec or steps
     # if both are None, then full audio samples are used in a batch
     max_time_sec=None,
-    max_time_steps=8000,
+    max_time_steps=16000,
     # Hold moving averaged parameters and use them for evaluation
     exponential_moving_average=True,
     # averaged = decay * averaged + (1 - decay) * x
@@ -124,7 +124,7 @@ hparams = tf.contrib.training.HParams(
     checkpoint_interval=100,
     train_eval_interval=100,
     # per-epoch interval
-    test_eval_epoch_interval=5,
+    test_eval_epoch_interval=50,
     save_optimizer_state=True,
 
     # Eval:
