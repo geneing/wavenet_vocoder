@@ -643,7 +643,8 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     if do_eval:
         # NOTE: use train step (i.e., global_step) for filename
-        eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
+        #ei eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
+        pass
 
     # Update
     if train:
@@ -938,8 +939,10 @@ if __name__ == "__main__":
 
     # Train!
     try:
-        train_loop(device, model, data_loaders, optimizer, writer,
+        with torch.autograd.profiler.profile() as prof:
+            train_loop(device, model, data_loaders, optimizer, writer,
                    checkpoint_dir=checkpoint_dir)
+        print(prof)
     except KeyboardInterrupt:
         print("Interrupted!")
         pass

@@ -212,11 +212,14 @@ class WaveRNN(nn.Module):
         # Local Conditioning
         if c is not None:
             # B x C x T
-            c_bct = torch.zeros((c.size(0), c.size(1), 1), dtype=c.dtype, requires_grad=False, device=c.device)
+            c_bct = torch.zeros((c.size(0), c.size(1), T), dtype=c.dtype, requires_grad=False, device=c.device)
 
             for i in range(T):
                 # upsampling through linear interpolation
-                c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size], c[:,:,i//self.hop_size+1], (i/self.hop_size) % 1)
+                try:
+                    c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size-1], c[:,:,i//self.hop_size], 1.-((i/self.hop_size) % 1))
+                except IndexError:
+                    c_bct[:,:,i] = c[:, :, i//self.hop_size]*((i/self.hop_size) % 1)
 
         outputs = []
         if initial_input is None:
@@ -241,9 +244,13 @@ class WaveRNN(nn.Module):
             ct = None if c is None else c_bct[:, :, t].unsqueeze(-1)
             gt = None if g is None else g_bct[:, :, t].unsqueeze(-1)
 
-            x = torch.cat((current_input, gt, ct), 2)
+            if gt is not None:
+                current_input=torch.cat((current_input,gt),1)
 
-            hidden = self.layers[0](x, hidden)
+            if ct is not None:
+                current_input=torch.cat((current_input,ct),1)
+
+            hidden = self.layers[0](current_input, hidden)
             lin1 = self.layers[1](hidden)
             x = self.layers[2](lin1)
 
