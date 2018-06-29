@@ -186,6 +186,7 @@ class WaveRNN(nn.Module):
         """
         self.clear_buffer()
         B = 1
+        hidden = torch.zeros((B,self.hidden_size), dtype=initial_input.dtype, device=initial_input.device)
 
         # shape (B x C x T)
         if test_inputs is not None:
@@ -227,22 +228,22 @@ class WaveRNN(nn.Module):
                 initial_input = Variable(torch.zeros(B, 1, 1))
             else:
                 initial_input = Variable(torch.zeros(B, self.out_channels, 1))
-                initial_input = audio.dummy_silence().squeeze().unsqueeze(0).unsqueeze(-1)  # TODO: is this ok?
+                initial_input = audio.dummy_silence().squeeze().unsqueeze(0)  # TODO: is this ok?
             # https://github.com/pytorch/pytorch/issues/584#issuecomment-275169567
             if next(self.parameters()).is_cuda:
                 initial_input = initial_input.cuda()
 
-        current_input = initial_input
+        current_input = initial_input[:, :, 0]
         for t in tqdm(range(T)):
             if test_inputs is not None and t < test_inputs.size(2):
-                current_input = test_inputs[:, :, t].unsqueeze(-1)
+                current_input = test_inputs[:, :, t]
             else:
                 if t > 0:
                     current_input = outputs[-1]
 
             # Conditioning features for single time step
-            ct = None if c is None else c_bct[:, :, t].unsqueeze(-1)
-            gt = None if g is None else g_bct[:, :, t].unsqueeze(-1)
+            ct = None if c is None else c_bct[:, :, t]
+            gt = None if g is None else g_bct[:, :, t]
 
             if gt is not None:
                 current_input=torch.cat((current_input,gt),1)
