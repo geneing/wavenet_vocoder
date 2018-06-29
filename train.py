@@ -65,6 +65,8 @@ from hparams import hparams, hparams_debug_string
 global_step = 0
 global_test_step = 0
 global_epoch = 0
+
+
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     cudnn.benchmark = False
@@ -507,7 +509,7 @@ def eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_
         g = g[idx]
         print("Shape of global conditioning features: {}".format(g.size()))
 
-    initial_input = audio.dummy_silence()
+    initial_input = audio.dummy_silence().transpose(1,2)
     initial_input = initial_input.to(device)
 
     # Run the model in fast eval mode
@@ -627,7 +629,10 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     # multi gpu support
     # you must make sure that batch size % num gpu == 0
-    y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
+    if use_cuda:
+        y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
+    else:
+        y_hat = model(x, c, g, False)
 
     if is_mulaw_quantize(hparams.input_type):
         # wee need 4d inputs for spatial cross entropy loss
@@ -643,7 +648,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     if do_eval:
         # NOTE: use train step (i.e., global_step) for filename
-        #ei eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
+        eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
         pass
 
     # Update
@@ -939,10 +944,10 @@ if __name__ == "__main__":
 
     # Train!
     try:
-        with torch.autograd.profiler.profile() as prof:
-            train_loop(device, model, data_loaders, optimizer, writer,
+        # with torch.autograd.profiler.profile() as prof:
+        train_loop(device, model, data_loaders, optimizer, writer,
                    checkpoint_dir=checkpoint_dir)
-        print(prof)
+        # print(prof)
     except KeyboardInterrupt:
         print("Interrupted!")
         pass
