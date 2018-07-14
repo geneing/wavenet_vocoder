@@ -65,6 +65,8 @@ from hparams import hparams, hparams_debug_string
 global_step = 0
 global_test_step = 0
 global_epoch = 0
+
+
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     cudnn.benchmark = False
@@ -387,6 +389,7 @@ def collate_fn(batch):
                     if len(x) > max_steps:
                         max_time_frames = max_steps // audio.get_hop_size()
                         s = np.random.randint(0, len(c) - max_time_frames)
+                        #print("Size of file=%6d, t_offset=%6d"  % (len(c), s,))
                         ts = s * audio.get_hop_size()
                         x = x[ts:ts + audio.get_hop_size() * max_time_frames]
                         c = c[s:s + max_time_frames, :]
@@ -506,7 +509,7 @@ def eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_
         g = g[idx]
         print("Shape of global conditioning features: {}".format(g.size()))
 
-    initial_input = audio.dummy_silence()
+    initial_input = audio.dummy_silence().transpose(1,2)
     initial_input = initial_input.to(device)
 
     # Run the model in fast eval mode
@@ -624,9 +627,9 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
     # NOTE: softmax is handled in F.cross_entrypy_loss
     # y_hat: (B x C x T)
 
+    # multi gpu support
+    # you must make sure that batch size % num gpu == 0
     if use_cuda:
-        # multi gpu support
-        # you must make sure that batch size % num gpu == 0
         y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
     else:
         y_hat = model(x, c, g, False)
@@ -645,7 +648,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     if do_eval:
         # NOTE: use train step (i.e., global_step) for filename
-        #ei eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
+        eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
         pass
 
     # Update
@@ -941,10 +944,10 @@ if __name__ == "__main__":
 
     # Train!
     try:
-        with torch.autograd.profiler.profile() as prof:
-            train_loop(device, model, data_loaders, optimizer, writer,
+        # with torch.autograd.profiler.profile() as prof:
+        train_loop(device, model, data_loaders, optimizer, writer,
                    checkpoint_dir=checkpoint_dir)
-        print(prof)
+        # print(prof)
     except KeyboardInterrupt:
         print("Interrupted!")
         pass

@@ -69,6 +69,7 @@ hparams = tf.contrib.training.HParams(
     legacy=True,
     gru_hidden_size = 512,
 
+
     # Local conditioning (set negative value to disable))
     cin_channels=80,
     # If True, use transposed convolutions to upsample conditional features,
