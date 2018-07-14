@@ -73,7 +73,7 @@ if __name__ == "__main__":
     # Data
     # Use exactly same testset used in training script
     # disable shuffle for convenience
-    test_data_loader = get_data_loaders(data_root, speaker_id, test_shuffle=False)["test"]
+    test_data_loader, _ = get_data_loaders(data_root, speaker_id, test_shuffle=False)["test"]
     test_dataset = test_data_loader.dataset
 
     # Model

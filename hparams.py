@@ -67,8 +67,6 @@ hparams = tf.contrib.training.HParams(
     # based on the legacy code that can generate high-quality audio.
     # Ref: https://github.com/r9y9/wavenet_vocoder/pull/73
     legacy=True,
-    gru_hidden_size = 512,
-
 
     # Local conditioning (set negative value to disable))
     cin_channels=80,

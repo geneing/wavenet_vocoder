@@ -353,7 +353,7 @@ def assert_ready_for_upsampling(x, c):
     assert len(x) % len(c) == 0 and len(x) // len(c) == audio.get_hop_size()
 
 
-def collate_fn(batch):
+def collate_fn(batch, nomaxtime = False):
     """Create batch
 
     Args:
@@ -370,10 +370,13 @@ def collate_fn(batch):
     local_conditioning = len(batch[0]) >= 2 and hparams.cin_channels > 0
     global_conditioning = len(batch[0]) >= 3 and hparams.gin_channels > 0
 
-    if hparams.max_time_sec is not None:
-        max_time_steps = int(hparams.max_time_sec * hparams.sample_rate)
-    elif hparams.max_time_steps is not None:
-        max_time_steps = hparams.max_time_steps
+    if not nomaxtime:
+        if hparams.max_time_sec is not None:
+            max_time_steps = int(hparams.max_time_sec * hparams.sample_rate)
+        elif hparams.max_time_steps is not None:
+            max_time_steps = hparams.max_time_steps
+        else:
+            max_time_steps = None
     else:
         max_time_steps = None
 
@@ -484,60 +487,63 @@ def save_waveplot(path, y_hat, y_target):
     plt.close()
 
 
-def eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema=None):
+def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, ema=None):
+    # Save audio
+    output_dir = eval_dir+'/Step_{:09d}'.format(global_step)
+    os.makedirs(output_dir, exist_ok=True)
+    output_idx = 0
+
     if ema is not None:
         print("Using averaged model for evaluation")
         model = clone_as_averaged_model(device, model, ema)
         model.make_generation_fast_()
 
     model.eval()
-    idx = np.random.randint(0, len(y))
-    length = input_lengths[idx].data.cpu().item()
+    for step, (x, y, c, g, input_lengths) in tqdm(enumerate(data_loader),desc="Model Evaluation"):
+        for idx in range(len(input_lengths)):
+            length = input_lengths[idx].data.cpu().item()
 
-    # (T,)
-    y_target = y[idx].view(-1).data.cpu().numpy()[:length]
+            # (T,)
+            y_target = y[idx].view(-1).data.cpu().numpy()[:length]
 
-    if c is not None:
-        if hparams.upsample_conditional_features:
-            c = c[idx, :, :length // audio.get_hop_size()].unsqueeze(0)
-        else:
-            c = c[idx, :, :length].unsqueeze(0)
-        assert c.dim() == 3
-        print("Shape of local conditioning features: {}".format(c.size()))
-    if g is not None:
-        # TODO: test
-        g = g[idx]
-        print("Shape of global conditioning features: {}".format(g.size()))
+            if c is not None:
+                if hparams.upsample_conditional_features:
+                    c = c[idx, :, :length // audio.get_hop_size()].unsqueeze(0)
+                else:
+                    c = c[idx, :, :length].unsqueeze(0)
+                assert c.dim() == 3
+            if g is not None:
+                # TODO: test
+                g = g[idx]
 
-    initial_input = audio.dummy_silence().transpose(1,2)
-    initial_input = initial_input.to(device)
+            initial_input = audio.dummy_silence().transpose(1,2)
+            initial_input = initial_input.to(device)
 
-    # Run the model in fast eval mode
-    with torch.no_grad():
-        y_hat = model.incremental_forward(
-            initial_input, c=c, g=g, T=length, softmax=True, quantize=True, tqdm=tqdm,
-            log_scale_min=hparams.log_scale_min)
+            # Run the model in fast eval mode
+            with torch.no_grad():
+                y_hat = model.incremental_forward(
+                    initial_input, c=c, g=g, T=length, softmax=True, quantize=True,
+                    log_scale_min=hparams.log_scale_min)
 
-    if is_mulaw_quantize(hparams.input_type):
-        y_hat = y_hat.max(1)[1].view(-1).long().cpu().data.numpy()
-        y_hat = P.inv_mulaw_quantize(y_hat, hparams.quantize_channels)
-        y_target = P.inv_mulaw_quantize(y_target, hparams.quantize_channels)
-    elif is_mulaw(hparams.input_type):
-        y_hat = P.inv_mulaw(y_hat.view(-1).cpu().data.numpy(), hparams.quantize_channels)
-        y_target = P.inv_mulaw(y_target, hparams.quantize_channels)
-    else:
-        y_hat = y_hat.view(-1).cpu().data.numpy()
+            if is_mulaw_quantize(hparams.input_type):
+                y_hat = y_hat.max(1)[1].view(-1).long().cpu().data.numpy()
+                y_hat = P.inv_mulaw_quantize(y_hat, hparams.quantize_channels)
+                y_target = P.inv_mulaw_quantize(y_target, hparams.quantize_channels)
+            elif is_mulaw(hparams.input_type):
+                y_hat = P.inv_mulaw(y_hat.view(-1).cpu().data.numpy(), hparams.quantize_channels)
+                y_target = P.inv_mulaw(y_target, hparams.quantize_channels)
+            else:
+                y_hat = y_hat.view(-1).cpu().data.numpy()
 
-    # Save audio
-    os.makedirs(eval_dir, exist_ok=True)
-    path = join(eval_dir, "step{:09d}_predicted.wav".format(global_step))
-    librosa.output.write_wav(path, y_hat, sr=hparams.sample_rate)
-    path = join(eval_dir, "step{:09d}_target.wav".format(global_step))
-    librosa.output.write_wav(path, y_target, sr=hparams.sample_rate)
+            path = join(output_dir, "eval{:09d}_predicted.wav".format(output_idx))
+            librosa.output.write_wav(path, y_hat, sr=hparams.sample_rate)
+            path = join(eval_dir, "eval{:09d}_target.wav".format(output_idx))
+            librosa.output.write_wav(path, y_target, sr=hparams.sample_rate)
 
-    # save figure
-    path = join(eval_dir, "step{:09d}_waveplots.png".format(global_step))
-    save_waveplot(path, y_hat, y_target)
+            # save figure
+            path = join(eval_dir, "eval{:09d}_waveplots.png".format(output_idx))
+            save_waveplot(path, y_hat, y_target)
+            output_idx += 1
 
 
 def save_states(global_step, writer, y_hat, y, input_lengths, checkpoint_dir=None):
@@ -586,7 +592,7 @@ def save_states(global_step, writer, y_hat, y, input_lengths, checkpoint_dir=Non
 
 def __train_step(device, phase, epoch, global_step, global_test_step,
                  model, optimizer, writer, criterion,
-                 x, y, c, g, input_lengths,
+                 x, y, c, g, input_lengths, eval_data_loader,
                  checkpoint_dir, eval_dir=None, do_eval=False, ema=None):
     sanity_check(model, c, g)
 
@@ -648,7 +654,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     if do_eval:
         # NOTE: use train step (i.e., global_step) for filename
-        eval_model(global_step, writer, device, model, y, c, g, input_lengths, eval_dir, ema)
+        eval_model(global_step, writer, device, model, eval_data_loader, eval_dir, ema)
         pass
 
     # Update
@@ -673,7 +679,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
     return loss.item()
 
 
-def train_loop(device, model, data_loaders, optimizer, writer, checkpoint_dir=None):
+def train_loop(device, model, data_loaders, eval_data_loader, optimizer, writer, checkpoint_dir=None):
     if is_mulaw_quantize(hparams.input_type):
         criterion = MaskedCrossEntropyLoss()
     else:
@@ -714,7 +720,7 @@ def train_loop(device, model, data_loaders, optimizer, writer, checkpoint_dir=No
                 # Do step
                 running_loss += __train_step(device,
                                              phase, global_epoch, global_step, global_test_step, model,
-                                             optimizer, writer, criterion, x, y, c, g, input_lengths,
+                                             optimizer, writer, criterion, x, y, c, g, input_lengths, eval_data_loader,
                                              checkpoint_dir, eval_dir, do_eval, ema)
 
                 # update global state
@@ -866,6 +872,13 @@ def get_data_loaders(data_root, speaker_id, test_shuffle=True):
             num_workers=hparams.num_workers, sampler=sampler, shuffle=shuffle,
             collate_fn=collate_fn, pin_memory=hparams.pin_memory)
 
+        if phase == "test":
+            eval_collate=lambda batch: collate_fn(batch, nomaxtime=True)
+            eval_loader = data_utils.DataLoader(
+                dataset, batch_size=1,
+                num_workers=1, shuffle=False,
+                collate_fn=eval_collate)
+
         speaker_ids = {}
         for idx, (x, c, g) in enumerate(dataset):
             if g is not None:
@@ -878,7 +891,7 @@ def get_data_loaders(data_root, speaker_id, test_shuffle=True):
 
         data_loaders[phase] = data_loader
 
-    return data_loaders
+    return data_loaders, eval_loader
 
 
 if __name__ == "__main__":
@@ -912,7 +925,7 @@ if __name__ == "__main__":
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Dataloader setup
-    data_loaders = get_data_loaders(data_root, speaker_id, test_shuffle=True)
+    data_loaders, eval_data_loader = get_data_loaders(data_root, speaker_id, test_shuffle=True)
 
     device = torch.device("cuda" if use_cuda else "cpu")
 
@@ -945,7 +958,7 @@ if __name__ == "__main__":
     # Train!
     try:
         # with torch.autograd.profiler.profile() as prof:
-        train_loop(device, model, data_loaders, optimizer, writer,
+        train_loop(device, model, data_loaders, eval_data_loader, optimizer, writer,
                    checkpoint_dir=checkpoint_dir)
         # print(prof)
     except KeyboardInterrupt:
