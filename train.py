@@ -500,11 +500,11 @@ def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, 
 
     model.eval()
     for step, (x, y, c, g, input_lengths) in tqdm(enumerate(data_loader),desc="Model Evaluation"):
-        for idx in range(len(input_lengths)):
+        for idx in range(x.shape[0]):
             length = input_lengths[idx].data.cpu().item()
 
             # (T,)
-            y_target = y[idx].view(-1).data.cpu().numpy()[:length]
+            y_target = y[idx,:,:].view(-1).data.cpu().numpy()[:length]
 
             if c is not None:
                 if hparams.upsample_conditional_features:
@@ -537,13 +537,15 @@ def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, 
 
             path = join(output_dir, "eval{:09d}_predicted.wav".format(output_idx))
             librosa.output.write_wav(path, y_hat, sr=hparams.sample_rate)
-            path = join(eval_dir, "eval{:09d}_target.wav".format(output_idx))
+            path = join(output_dir, "eval{:09d}_target.wav".format(output_idx))
             librosa.output.write_wav(path, y_target, sr=hparams.sample_rate)
 
             # save figure
-            path = join(eval_dir, "eval{:09d}_waveplots.png".format(output_idx))
+            path = join(output_dir, "eval{:09d}_waveplots.png".format(output_idx))
             save_waveplot(path, y_hat, y_target)
             output_idx += 1
+            if output_idx > 10:
+                return
 
 
 def save_states(global_step, writer, y_hat, y, input_lengths, checkpoint_dir=None):

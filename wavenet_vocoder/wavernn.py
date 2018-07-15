@@ -249,7 +249,8 @@ class WaveRNN(nn.Module):
                 current_input=torch.cat((current_input,gt),1)
 
             if ct is not None:
-                current_input=torch.cat((current_input,ct),1)
+                ct = ct.to(current_input.device)
+                current_input=torch.cat((current_input, ct), 1)
 
             hidden = self.layers[0](current_input, hidden)
             lin1 = self.layers[1](hidden)
