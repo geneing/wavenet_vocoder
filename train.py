@@ -474,7 +474,7 @@ def time_string():
     return datetime.now().strftime('%Y-%m-%d %H:%M')
 
 
-def save_waveplot(path, y_hat, y_target):
+def plot_waveplot(y_hat, y_target):
     sr = hparams.sample_rate
 
     plt.figure(figsize=(16, 6))
@@ -483,6 +483,12 @@ def save_waveplot(path, y_hat, y_target):
     plt.subplot(2, 1, 2)
     librosa.display.waveplot(y_hat, sr=sr)
     plt.tight_layout()
+    fig = plt.gcf()
+    return fig
+
+
+def save_waveplot(path, y_hat, y_target):
+    plot_waveplot(y_hat, y_target)
     plt.savefig(path, format="png")
     plt.close()
 
@@ -537,12 +543,17 @@ def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, 
 
             path = join(output_dir, "eval{:09d}_predicted.wav".format(output_idx))
             librosa.output.write_wav(path, y_hat, sr=hparams.sample_rate)
+            debug_writer.add_audio('predicted_%d_idx_%d'%(global_step, output_idx), y_hat, global_step=global_step, sample_rate=hparams.sample_rate)
             path = join(output_dir, "eval{:09d}_target.wav".format(output_idx))
             librosa.output.write_wav(path, y_target, sr=hparams.sample_rate)
+            debug_writer.add_audio('target_%d_idx_%d'%(global_step, output_idx), y_target, global_step=global_step, sample_rate=hparams.sample_rate)
 
             # save figure
             path = join(output_dir, "eval{:09d}_waveplots.png".format(output_idx))
             save_waveplot(path, y_hat, y_target)
+            #plt.close()
+            #fig = plot_waveplot(y_hat, y_target)
+            #debug_writer.add_figure()
             output_idx += 1
             if output_idx > 10:
                 return
@@ -634,6 +645,14 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
     # Apply model: Run the model in regular eval mode
     # NOTE: softmax is handled in F.cross_entrypy_loss
     # y_hat: (B x C x T)
+
+    # if train and step==0 and epoch==0:
+    #     try:
+    #         with torch.onnx.set_training(model, False):
+    #             trace, a = torch.jit.get_trace_graph(model, (x, c))
+    #     except Exception as e:
+    #         print(e)
+        #writer.add_graph(model, (x, c, g, False))
 
     # multi gpu support
     # you must make sure that batch size % num gpu == 0
