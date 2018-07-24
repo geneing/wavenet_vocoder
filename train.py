@@ -493,7 +493,7 @@ def save_waveplot(path, y_hat, y_target):
     plt.close()
 
 
-def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, ema=None):
+def eval_model(global_step, debug_writer, device, model, eval_data_loader, eval_dir, ema=None):
     # Save audio
     output_dir = eval_dir+'/Step_{:09d}'.format(global_step)
     os.makedirs(output_dir, exist_ok=True)
@@ -505,7 +505,7 @@ def eval_model(global_step, debug_writer, device, model, data_loader, eval_dir, 
         model.make_generation_fast_()
 
     model.eval()
-    for step, (x, y, c, g, input_lengths) in tqdm(enumerate(data_loader),desc="Model Evaluation"):
+    for step, (x, y, c, g, input_lengths) in tqdm(enumerate(eval_data_loader),desc="Model Evaluation"):
         for idx in range(x.shape[0]):
             length = input_lengths[idx].data.cpu().item()
 
@@ -893,12 +893,12 @@ def get_data_loaders(data_root, speaker_id, test_shuffle=True):
             num_workers=hparams.num_workers, sampler=sampler, shuffle=shuffle,
             collate_fn=collate_fn, pin_memory=hparams.pin_memory)
 
-        if phase == "test":
-            eval_collate=lambda batch: collate_fn(batch, nomaxtime=True)
-            eval_loader = data_utils.DataLoader(
-                dataset, batch_size=1,
-                num_workers=1, shuffle=False,
-                collate_fn=eval_collate)
+        dataset_eval = PyTorchDataset(X, Mel)
+        eval_collate=lambda batch: collate_fn(batch, nomaxtime=True)
+        eval_loader = data_utils.DataLoader(
+            dataset_eval, batch_size=1,
+            num_workers=1, shuffle=False,
+            collate_fn=eval_collate)
 
         speaker_ids = {}
         for idx, (x, c, g) in enumerate(dataset):

@@ -110,7 +110,7 @@ def wavegen(model, length=None, c=None, g=None, initial_value=None,
         initial_input = np_utils.to_categorical(
             initial_value, num_classes=hparams.quantize_channels).astype(np.float32)
         initial_input = torch.from_numpy(initial_input).view(
-            1, 1, hparams.quantize_channels)
+            1, hparams.quantize_channels, 1)
     else:
         initial_input = torch.zeros(1, 1, 1).fill_(initial_value)
 
