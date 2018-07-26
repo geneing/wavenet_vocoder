@@ -186,7 +186,7 @@ class WaveRNN(nn.Module):
         """
         self.clear_buffer()
         B = 1
-        hidden = torch.zeros((B,self.hidden_size), dtype=initial_input.dtype, device=initial_input.device)
+        hidden = torch.zeros((1, B, self.hidden_size), dtype=initial_input.dtype, device=initial_input.device)
 
         # shape (B x C x T)
         if test_inputs is not None:
@@ -252,8 +252,8 @@ class WaveRNN(nn.Module):
                 ct = ct.to(current_input.device)
                 current_input=torch.cat((current_input, ct), 1)
 
-            hidden = self.layers[0](current_input, hidden)
-            lin1 = self.layers[1](hidden)
+            out, hidden = self.layers[0](current_input.unsqueeze(0), hidden)
+            lin1 = self.layers[1](out)
             x = self.layers[2](lin1)
 
             # Generate next input by sampling

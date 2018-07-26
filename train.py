@@ -555,7 +555,7 @@ def eval_model(global_step, debug_writer, device, model, eval_data_loader, eval_
             #fig = plot_waveplot(y_hat, y_target)
             #debug_writer.add_figure()
             output_idx += 1
-            if output_idx > 10:
+            if output_idx > 3:
                 return
 
 
