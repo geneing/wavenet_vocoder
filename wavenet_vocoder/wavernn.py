@@ -73,7 +73,7 @@ class WaveRNN(nn.Module):
         cond_channels += gin_channels if gin_channels > 0 else 0
 
         self.layers = nn.ModuleList()
-        rnn = nn.GRUCell(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True)
+        rnn = nn.GRU(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
         self.layers.append(rnn)
 
         linear1 = nn.Linear(self.hidden_size, self.hidden_size)
@@ -117,7 +117,7 @@ class WaveRNN(nn.Module):
         """
         B, n_outchannels, T = x.size()
         output = torch.zeros_like(x)
-        hidden = torch.zeros((B,self.hidden_size), dtype=x.dtype, device=x.device)
+        hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
 
         if g is not None:
             if self.embed_speakers is not None:
@@ -150,13 +150,13 @@ class WaveRNN(nn.Module):
                 c_bct = c
 
         # Feed data to network
-        for t in range(T):
-            hidden = self.layers[0](x[:, :, t], hidden)
-            lin1 = self.layers[1](hidden)
-            lin2 = self.layers[2](lin1)
-            output[:, :, t] = F.softmax(lin2, dim=1) if softmax else lin2
+        #for t in range(T):
+        out, hidden = self.layers[0](x.permute(2,0,1), hidden)
+        lin1 = self.layers[1](out)
+        lin2 = self.layers[2](lin1)
+        output = F.softmax(lin2, dim=2) if softmax else lin2
 
-        return output
+        return output.permute(1,2,0)
 
     def incremental_forward(self, initial_input=None, c=None, g=None,
                             T=100, test_inputs=None,
@@ -267,6 +267,7 @@ class WaveRNN(nn.Module):
                         np.arange(self.out_channels), p=x.view(-1).data.cpu().numpy())
                     x.zero_()
                     x[:, sample] = 1.0
+
             outputs += [x]
 
         # T x B x C
