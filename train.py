@@ -943,6 +943,7 @@ if __name__ == "__main__":
     
     fs = hparams.sample_rate
 
+    checkpoint_dir += '/' + datetime.now().strftime("%Y%m%d-%H%M%S")
     os.makedirs(checkpoint_dir, exist_ok=True)
 
     # Dataloader setup
@@ -973,6 +974,8 @@ if __name__ == "__main__":
     # Setup summary writer for tensorboard
     if log_event_path is None:
         log_event_path = "log/run-test" + str(datetime.now()).replace(" ", "_")
+    else:
+        log_event_path += '/' + datetime.now().strftime("%Y%m%d-%H%M%S")
     print("TensorBoard event log path: {}".format(log_event_path))
     writer = SummaryWriter(log_dir=log_event_path)
 

@@ -117,7 +117,7 @@ class WaveRNN(nn.Module):
         """
         B, n_outchannels, T = x.size()
         output = torch.zeros_like(x)
-        #hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
+        hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
 
         if g is not None:
             if self.embed_speakers is not None:
@@ -151,7 +151,7 @@ class WaveRNN(nn.Module):
 
         # Feed data to network
         #for t in range(T):
-        out, _ = self.layers[0](x.permute(2,0,1))
+        out, _ = self.layers[0](x.permute(2,0,1), hidden)
         lin1 = self.layers[1](out)
         lin2 = self.layers[2](lin1)
         output = F.softmax(lin2, dim=2) if softmax else lin2
