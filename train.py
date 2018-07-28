@@ -656,10 +656,11 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
 
     # multi gpu support
     # you must make sure that batch size % num gpu == 0
-    if use_cuda:
-        y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
-    else:
-        y_hat = model(x, c, g, False)
+    # if use_cuda:
+    #     y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
+    # else:
+    #     y_hat = model(x, c, g, False)
+    y_hat = model(x, c, g, False)
 
     if is_mulaw_quantize(hparams.input_type):
         # wee need 4d inputs for spatial cross entropy loss
