@@ -146,12 +146,12 @@ class WaveRNN(nn.Module):
 
         # Feed data to network
         #for t in range(T):
-        out, _ = self.rnn(x.permute(2,0,1).clone())
+        out, _ = self.rnn(x.permute(2,0,1))
         lin1 = self.linear1(out)
         lin2 = self.linear2(lin1)
         output = F.softmax(lin2, dim=2) if softmax else lin2
 
-        return output.permute(1,2,0).clone()
+        return output.permute(1,2,0)
 
     def incremental_forward(self, initial_input=None, c=None, g=None,
                             T=100, test_inputs=None,
