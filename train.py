@@ -70,7 +70,7 @@ global_epoch = 0
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     cudnn.benchmark = False
-torch.backends.cudnn.enabled = False
+torch.backends.cudnn.enabled = True
 
 def sanity_check(model, c, g):
     if model.has_speaker_embedding():
@@ -609,87 +609,88 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
                  checkpoint_dir, eval_dir=None, do_eval=False, ema=None):
     sanity_check(model, c, g)
 
-    # x : (B, C, T)
-    # y : (B, T, 1)
-    # c : (B, C, T)
-    # g : (B,)
-    train = (phase == "train")
-    clip_thresh = hparams.clip_thresh
-    if train:
-        model.train()
-        step = global_step
-    else:
-        model.eval()
-        step = global_test_step
+    with torch.autograd.detect_anomaly():
+        # x : (B, C, T)
+        # y : (B, T, 1)
+        # c : (B, C, T)
+        # g : (B,)
+        train = (phase == "train")
+        clip_thresh = hparams.clip_thresh
+        if train:
+            model.train()
+            step = global_step
+        else:
+            model.eval()
+            step = global_test_step
 
-    # Learning rate schedule
-    current_lr = hparams.initial_learning_rate
-    if train and hparams.lr_schedule is not None:
-        lr_schedule_f = getattr(lrschedule, hparams.lr_schedule)
-        current_lr = lr_schedule_f(
-            hparams.initial_learning_rate, step, **hparams.lr_schedule_kwargs)
-        for param_group in optimizer.param_groups:
-            param_group['lr'] = current_lr
-    optimizer.zero_grad()
+        # Learning rate schedule
+        current_lr = hparams.initial_learning_rate
+        if train and hparams.lr_schedule is not None:
+            lr_schedule_f = getattr(lrschedule, hparams.lr_schedule)
+            current_lr = lr_schedule_f(
+                hparams.initial_learning_rate, step, **hparams.lr_schedule_kwargs)
+            for param_group in optimizer.param_groups:
+                param_group['lr'] = current_lr
+        optimizer.zero_grad()
 
-    # Prepare data
-    x, y = x.to(device), y.to(device)
-    input_lengths = input_lengths.to(device)
-    c = c.to(device) if c is not None else None
-    g = g.to(device) if g is not None else None
+        # Prepare data
+        x, y = x.to(device), y.to(device)
+        input_lengths = input_lengths.to(device)
+        c = c.to(device) if c is not None else None
+        g = g.to(device) if g is not None else None
 
-    # (B, T, 1)
-    mask = sequence_mask(input_lengths, max_len=x.size(-1)).unsqueeze(-1)
-    mask = mask[:, 1:, :]
+        # (B, T, 1)
+        mask = sequence_mask(input_lengths, max_len=x.size(-1)).unsqueeze(-1)
+        mask = mask[:, 1:, :]
 
-    # Apply model: Run the model in regular eval mode
-    # NOTE: softmax is handled in F.cross_entrypy_loss
-    # y_hat: (B x C x T)
+        # Apply model: Run the model in regular eval mode
+        # NOTE: softmax is handled in F.cross_entrypy_loss
+        # y_hat: (B x C x T)
 
-    # if train and step==0 and epoch==0:
-    #     try:
-    #         with torch.onnx.set_training(model, False):
-    #             trace, a = torch.jit.get_trace_graph(model, (x, c))
-    #     except Exception as e:
-    #         print(e)
-        #writer.add_graph(model, (x, c, g, False))
+        # if train and step==0 and epoch==0:
+        #     try:
+        #         with torch.onnx.set_training(model, False):
+        #             trace, a = torch.jit.get_trace_graph(model, (x, c))
+        #     except Exception as e:
+        #         print(e)
+            #writer.add_graph(model, (x, c, g, False))
 
-    # multi gpu support
-    # you must make sure that batch size % num gpu == 0
-    # if use_cuda:
-    #     y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
-    # else:
-    #     y_hat = model(x, c, g, False)
-    y_hat = model(x, c, g, False)
+        # multi gpu support
+        # you must make sure that batch size % num gpu == 0
+        # if use_cuda:
+        #     y_hat = torch.nn.parallel.data_parallel(model, (x, c, g, False))
+        # else:
+        #     y_hat = model(x, c, g, False)
+        y_hat = model(x, c, g, False)
 
-    if is_mulaw_quantize(hparams.input_type):
-        # wee need 4d inputs for spatial cross entropy loss
-        # (B, C, T, 1)
-        y_hat = y_hat.unsqueeze(-1)
-        loss = criterion(y_hat[:, :, :-1, :], y[:, 1:, :], mask=mask)
-    else:
-        loss = criterion(y_hat[:, :, :-1], y[:, 1:, :], mask=mask)
+        if is_mulaw_quantize(hparams.input_type):
+            # wee need 4d inputs for spatial cross entropy loss
+            # (B, C, T, 1)
+            y_hat = y_hat.unsqueeze(-1)
+            loss = criterion(y_hat[:, :, :-1, :], y[:, 1:, :], mask=mask)
+        else:
+            loss = criterion(y_hat[:, :, :-1], y[:, 1:, :], mask=mask)
 
-    if train and step > 0 and step % hparams.checkpoint_interval == 0:
-        save_states(step, writer, y_hat, y, input_lengths, checkpoint_dir)
-        save_checkpoint(device, model, optimizer, step, checkpoint_dir, epoch, ema)
+        if train and step > 0 and step % hparams.checkpoint_interval == 0:
+            save_states(step, writer, y_hat, y, input_lengths, checkpoint_dir)
+            save_checkpoint(device, model, optimizer, step, checkpoint_dir, epoch, ema)
+
+        # Update
+        if train:
+            loss.backward()
+            if clip_thresh > 0:
+                grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_thresh)
+            optimizer.step()
+            # update moving average
+            if ema is not None:
+                for name, param in model.named_parameters():
+                    if name in ema.shadow:
+                        ema.update(name, param.data)
 
     if do_eval:
         # NOTE: use train step (i.e., global_step) for filename
         eval_model(global_step, writer, device, model, eval_data_loader, eval_dir, ema)
         pass
-
-    # Update
-    if train:
-        loss.backward()
-        if clip_thresh > 0:
-            grad_norm = torch.nn.utils.clip_grad_norm_(model.parameters(), clip_thresh)
-        optimizer.step()
-        # update moving average
-        if ema is not None:
-            for name, param in model.named_parameters():
-                if name in ema.shadow:
-                    ema.update(name, param.data)
 
     # Logs
     writer.add_scalar("{} loss".format(phase), float(loss.item()), step)

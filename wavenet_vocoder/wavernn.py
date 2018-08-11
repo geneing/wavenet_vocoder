@@ -66,21 +66,17 @@ class WaveRNN(nn.Module):
         self.hop_size = hop_size
         self.receptive_field = 0 #doesn't make sense for wavernn
         self.upsample_conditional_features = upsample_conditional_features
+        self.in_channels = in_channels if not scalar_input else 1
 
-        assert (not scalar_input)
+        #assert (not scalar_input)
 
         cond_channels = cin_channels if cin_channels > 0 else 0
         cond_channels += gin_channels if gin_channels > 0 else 0
 
         self.layers = nn.ModuleList()
-        rnn = nn.GRU(input_size=in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
-        self.layers.append(rnn)
-
-        linear1 = nn.Linear(self.hidden_size, self.hidden_size)
-        self.layers.append(nn.ReLU(linear1))
-
-        linear2 = nn.Linear(self.hidden_size, self.out_channels)
-        self.layers.append(linear2)
+        self.rnn = nn.GRU(input_size=self.in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
+        self.linear1 = nn.ReLU(nn.Linear(self.hidden_size, self.hidden_size))
+        self.linear2 = nn.Linear(self.hidden_size, self.out_channels)
 
         if gin_channels > 0:
             assert n_speakers is not None
@@ -116,7 +112,7 @@ class WaveRNN(nn.Module):
             Variable: output, shape B x out_channels x T
         """
         B, n_outchannels, T = x.size()
-        output = torch.zeros_like(x)
+        output = torch.zeros((B, self.out_channels, T), dtype=x.dtype, device=x.device)
         hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
 
         if g is not None:
@@ -151,12 +147,12 @@ class WaveRNN(nn.Module):
 
         # Feed data to network
         #for t in range(T):
-        out, _ = self.layers[0](x.permute(2,0,1), hidden)
-        lin1 = self.layers[1](out)
-        lin2 = self.layers[2](lin1)
+        out, _ = self.rnn(x.permute(2,0,1).clone())
+        lin1 = self.linear1(out)
+        lin2 = self.linear2(lin1)
         output = F.softmax(lin2, dim=2) if softmax else lin2
 
-        return output.permute(1,2,0)
+        return output.permute(1,2,0).clone()
 
     def incremental_forward(self, initial_input=None, c=None, g=None,
                             T=100, test_inputs=None,
