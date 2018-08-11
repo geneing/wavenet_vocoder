@@ -274,7 +274,7 @@ class WaveRNN(nn.Module):
         return outputs
 
     def clear_buffer(self):
-        for f in self.layers:
+        for f in (self.rnn, self.linear1, self.linear2):
             try:
                 f.clear_buffer()
             except AttributeError:
