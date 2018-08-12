@@ -70,7 +70,7 @@ global_epoch = 0
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     cudnn.benchmark = False
-torch.backends.cudnn.enabled = True
+torch.backends.cudnn.enabled = False
 
 def sanity_check(model, c, g):
     if model.has_speaker_embedding():
@@ -608,8 +608,8 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
                  x, y, c, g, input_lengths, eval_data_loader,
                  checkpoint_dir, eval_dir=None, do_eval=False, ema=None):
     sanity_check(model, c, g)
-
-    with torch.autograd.detect_anomaly():
+    
+    if 1: #with torch.autograd.detect_anomaly():
         # x : (B, C, T)
         # y : (B, T, 1)
         # c : (B, C, T)
