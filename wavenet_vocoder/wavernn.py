@@ -73,7 +73,7 @@ class WaveRNN(nn.Module):
         cond_channels = cin_channels if cin_channels > 0 else 0
         cond_channels += gin_channels if gin_channels > 0 else 0
 
-        self.rnn = nn.LSTM(input_size=self.in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
+        self.rnn = nn.GRU(input_size=self.in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
         self.linear1 = nn.ReLU(nn.Linear(self.hidden_size, self.hidden_size))
         self.linear2 = nn.Linear(self.hidden_size, self.out_channels)
 
