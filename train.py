@@ -70,7 +70,7 @@ global_epoch = 0
 use_cuda = torch.cuda.is_available()
 if use_cuda:
     cudnn.benchmark = False
-torch.backends.cudnn.enabled = False
+torch.backends.cudnn.enabled = True
 
 def sanity_check(model, c, g):
     if model.has_speaker_embedding():

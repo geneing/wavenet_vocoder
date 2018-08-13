@@ -113,6 +113,8 @@ class WaveRNN(nn.Module):
         B, n_outchannels, T = x.size()
         output = torch.zeros((B, self.out_channels, T), dtype=x.dtype, device=x.device)
         hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
+        g_bct = torch.tensor([])
+        c_bct = torch.tensor([])
 
         if g is not None:
             if self.embed_speakers is not None:
@@ -124,7 +126,6 @@ class WaveRNN(nn.Module):
 
                 # Expand global conditioning features to all time steps
                 g_bct = _expand_global_features(B, T, g, bct=True)
-                x = torch.cat((x,g_bct),1)
 
         # Local Conditioning
         if c is not None:
@@ -138,15 +139,15 @@ class WaveRNN(nn.Module):
                         c_bct[:,:,i] = torch.lerp(c[:,:,i//self.hop_size-1], c[:,:,i//self.hop_size], 1.-((i/self.hop_size) % 1))
                     except IndexError:
                         c_bct[:,:,i] = c[:, :, i//self.hop_size]*((i/self.hop_size) % 1)
-
                 assert c_bct.size(-1) == x.size(-1)
-                x = torch.cat((x, c_bct), 1)
             else:
                 c_bct = c
 
+        xin = torch.cat((x, c_bct, g_bct), 1)
+
         # Feed data to network
         #for t in range(T):
-        out, _ = self.rnn(x.permute(2,0,1))
+        out, _ = self.rnn(xin.permute(2,0,1))
         lin1 = self.linear1(out)
         lin2 = self.linear2(lin1)
         output = F.softmax(lin2, dim=2) if softmax else lin2
