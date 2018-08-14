@@ -609,7 +609,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
                  checkpoint_dir, eval_dir=None, do_eval=False, ema=None):
     sanity_check(model, c, g)
     
-    if 1: #with torch.autograd.detect_anomaly():
+    with torch.autograd.detect_anomaly():
         # x : (B, C, T)
         # y : (B, T, 1)
         # c : (B, C, T)
@@ -666,8 +666,8 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
         if is_mulaw_quantize(hparams.input_type):
             # wee need 4d inputs for spatial cross entropy loss
             # (B, C, T, 1)
-            y_hat = y_hat.unsqueeze(-1)
-            loss = criterion(y_hat[:, :, :-1, :], y[:, 1:, :], mask=mask)
+            y_hat1 = y_hat.unsqueeze(-1)
+            loss = criterion(y_hat1[:, :, :-1, :], y[:, 1:, :], mask=mask)
         else:
             loss = criterion(y_hat[:, :, :-1], y[:, 1:, :], mask=mask)
 

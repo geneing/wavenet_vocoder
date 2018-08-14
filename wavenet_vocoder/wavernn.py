@@ -73,9 +73,9 @@ class WaveRNN(nn.Module):
         cond_channels = cin_channels if cin_channels > 0 else 0
         cond_channels += gin_channels if gin_channels > 0 else 0
 
-        self.rnn = nn.GRU(input_size=self.in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False)
-        self.linear1 = nn.ReLU(nn.Linear(self.hidden_size, self.hidden_size))
-        self.linear2 = nn.Linear(self.hidden_size, self.out_channels)
+        self.rnn = nn.GRU(input_size=self.in_channels+cond_channels, hidden_size=gru_hidden_size, bias=True, batch_first=False).cuda()
+        self.linear1 = nn.Linear(self.hidden_size, self.hidden_size).cuda()
+        self.linear2 = nn.Linear(self.hidden_size, self.out_channels).cuda()
 
         if gin_channels > 0:
             assert n_speakers is not None
@@ -113,8 +113,8 @@ class WaveRNN(nn.Module):
         B, n_outchannels, T = x.size()
         output = torch.zeros((B, self.out_channels, T), dtype=x.dtype, device=x.device)
         hidden = torch.zeros((1, B, self.hidden_size), dtype=x.dtype, device=x.device)
-        g_bct = torch.tensor([])
-        c_bct = torch.tensor([])
+        g_bct = torch.tensor([], device=x.device)
+        c_bct = torch.tensor([], device=x.device)
 
         if g is not None:
             if self.embed_speakers is not None:
@@ -147,8 +147,8 @@ class WaveRNN(nn.Module):
 
         # Feed data to network
         #for t in range(T):
-        out, _ = self.rnn(xin.permute(2,0,1))
-        lin1 = self.linear1(out)
+        out, _ = self.rnn(xin.permute(2,0,1), hidden)
+        lin1 = torch.nn.functional.relu(self.linear1(out))
         lin2 = self.linear2(lin1)
         output = F.softmax(lin2, dim=2) if softmax else lin2
 
@@ -248,8 +248,8 @@ class WaveRNN(nn.Module):
                 ct = ct.to(current_input.device)
                 current_input=torch.cat((current_input, ct), 1)
 
-            out, hidden = self.rnn(current_input.unsqueeze(0), hidden)
-            lin1 = self.linear1(out)
+            out, _ = self.rnn(current_input.unsqueeze(0), hidden)
+            lin1 = nn.functional.relu(self.linear1(out))
             x = self.linear2(lin1)
 
             # Generate next input by sampling
