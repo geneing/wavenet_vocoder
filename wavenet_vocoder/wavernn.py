@@ -183,6 +183,8 @@ class WaveRNN(nn.Module):
         self.clear_buffer()
         B = 1
         hidden = torch.zeros((1, B, self.hidden_size), dtype=initial_input.dtype, device=initial_input.device)
+        g_bct = torch.tensor([], device=initial_input.device)
+        c_bct = torch.tensor([], device=initial_input.device)
 
         # shape (B x C x T)
         if test_inputs is not None:
@@ -221,9 +223,8 @@ class WaveRNN(nn.Module):
         outputs = []
         if initial_input is None:
             if self.scalar_input:
-                initial_input = Variable(torch.zeros(B, 1, 1))
+                initial_input = torch.zeros(B, 1, 1)
             else:
-                initial_input = Variable(torch.zeros(B, self.out_channels, 1))
                 initial_input = audio.dummy_silence().squeeze().unsqueeze(0)  # TODO: is this ok?
             # https://github.com/pytorch/pytorch/issues/584#issuecomment-275169567
             if next(self.parameters()).is_cuda:
@@ -248,7 +249,7 @@ class WaveRNN(nn.Module):
                 ct = ct.to(current_input.device)
                 current_input=torch.cat((current_input, ct), 1)
 
-            out, _ = self.rnn(current_input.unsqueeze(0), hidden)
+            out, hidden = self.rnn(current_input.unsqueeze(0), hidden)
             lin1 = nn.functional.relu(self.linear1(out))
             x = self.linear2(lin1)
 
