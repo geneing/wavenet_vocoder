@@ -188,6 +188,7 @@ class WaveRNN(nn.Module):
 
         # shape (B x C x T)
         if test_inputs is not None:
+            test_inputs = test_inputs.to(initial_input.device)
             B = test_inputs.size(0)
             if T is None:
                 T = test_inputs.size(2)
@@ -220,7 +221,6 @@ class WaveRNN(nn.Module):
                 except IndexError:
                     c_bct[:,:,i] = c[:, :, i//self.hop_size]*((i/self.hop_size) % 1)
 
-        outputs = []
         if initial_input is None:
             if self.scalar_input:
                 initial_input = torch.zeros(B, 1, 1)
@@ -231,12 +231,16 @@ class WaveRNN(nn.Module):
                 initial_input = initial_input.cuda()
 
         current_input = initial_input[:, :, 0]
+        outputs = torch.zeros((B, 1 if self.scalar_input else self.out_channels, T), dtype=current_input.dtype, device=current_input.device)
+
+        self.rnn.flatten_parameters()
+
         for t in tqdm(range(T)):
             if test_inputs is not None and t < test_inputs.size(2):
                 current_input = test_inputs[:, :, t]
             else:
                 if t > 0:
-                    current_input = outputs[-1]
+                    current_input = outputs[:, :, t-1]
 
             # Conditioning features for single time step
             ct = None if c is None else c_bct[:, :, t]
@@ -249,28 +253,27 @@ class WaveRNN(nn.Module):
                 ct = ct.to(current_input.device)
                 current_input=torch.cat((current_input, ct), 1)
 
-            out, hidden = self.rnn(current_input.unsqueeze(0), hidden)
-            lin1 = nn.functional.relu(self.linear1(out))
-            x = self.linear2(lin1)
+            rnn_out, hidden = self.rnn(current_input.unsqueeze(0), hidden)
+            lin1 = torch.nn.functional.relu(self.linear1(rnn_out))
+            out = self.linear2(lin1)
 
             # Generate next input by sampling
             if self.scalar_input:
-                x = sample_from_discretized_mix_logistic(
-                    x.view(B, -1, 1), log_scale_min=log_scale_min)
+                out = sample_from_discretized_mix_logistic(
+                    out.view(B, -1, 1), log_scale_min=log_scale_min)
             else:
-                x = F.softmax(x.view(B, -1), dim=1) if softmax else x.view(B, -1)
+                out = F.softmax(out.view(B, -1), dim=1) if softmax else out.view(B, -1)
+
                 if quantize:
                     sample = np.random.choice(
-                        np.arange(self.out_channels), p=x.view(-1).data.cpu().numpy())
-                    x.zero_()
-                    x[:, sample] = 1.0
+                        np.arange(self.out_channels), p=out.view(-1).data.cpu().numpy())
+                    out.zero_()
+                    out[:, sample] = 1.0
 
-            outputs += [x]
+            outputs[:, :, t] = out
 
-        # T x B x C
-        outputs = torch.stack(outputs)
         # B x C x T
-        outputs = outputs.transpose(0, 1).transpose(1, 2).contiguous()
+        outputs = outputs.contiguous()
 
         self.clear_buffer()
         return outputs

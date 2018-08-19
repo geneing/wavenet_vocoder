@@ -529,7 +529,7 @@ def eval_model(global_step, debug_writer, device, model, eval_data_loader, eval_
             with torch.no_grad():
                 y_hat = model.incremental_forward(
                     initial_input, c=c, g=g, T=length, softmax=True, quantize=True,
-                    log_scale_min=hparams.log_scale_min)
+                    log_scale_min=hparams.log_scale_min) #test_inputs=y.permute(0,2,1)[:,:,:length],
 
             if is_mulaw_quantize(hparams.input_type):
                 y_hat = y_hat.max(1)[1].view(-1).long().cpu().data.numpy()
@@ -609,7 +609,7 @@ def __train_step(device, phase, epoch, global_step, global_test_step,
                  checkpoint_dir, eval_dir=None, do_eval=False, ema=None):
     sanity_check(model, c, g)
     
-    with torch.autograd.detect_anomaly():
+    if 1: #with torch.autograd.detect_anomaly():
         # x : (B, C, T)
         # y : (B, T, 1)
         # c : (B, C, T)
